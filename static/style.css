@@ -218,6 +218,13 @@ body {
     font-size: 0.95rem;
     font-weight: 500;
     color: var(--text-muted);
+    text-decoration: none;
+    transition: color 0.2s;
+}
+
+.logo .lab:hover {
+    color: var(--primary-color);
+    text-decoration: underline;
 }
 
 .remove-btn {
