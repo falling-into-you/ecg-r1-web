@@ -316,7 +316,7 @@ document.addEventListener('DOMContentLoaded', function() {
             feedbackMessage.classList.add('hidden');
             reasoningText.textContent = 'Generating...';
             reasoningText.classList.add('streaming');
-            diagnosisText.classList.add('streaming');
+            diagnosisText.classList.remove('streaming');
 
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
@@ -330,29 +330,69 @@ document.addEventListener('DOMContentLoaded', function() {
             let usePolling = false;
             let pendingDiagnosis = '';
             let pendingReasoning = '';
-            let flushTimer = null;
+            let flushRaf = null;
+            let streamDone = false;
+            let diagnosisStarted = false;
+
+            function setCursorTarget(target) {
+                if (target === 'reasoning') {
+                    reasoningText.classList.add('streaming');
+                    diagnosisText.classList.remove('streaming');
+                } else if (target === 'diagnosis') {
+                    reasoningText.classList.remove('streaming');
+                    diagnosisText.classList.add('streaming');
+                } else {
+                    reasoningText.classList.remove('streaming');
+                    diagnosisText.classList.remove('streaming');
+                }
+            }
+
+            function maybeFinishTyping() {
+                if (!streamDone) return;
+                if (pendingReasoning || pendingDiagnosis) return;
+                if (flushRaf) return;
+                setCursorTarget('none');
+            }
+
+            function flushStep() {
+                const step = 48;
+                let didWork = false;
+
+                if (pendingReasoning) {
+                    setCursorTarget('reasoning');
+                    const take = pendingReasoning.slice(0, step);
+                    pendingReasoning = pendingReasoning.slice(step);
+                    reasoningBuf += take;
+                    reasoningText.textContent = reasoningBuf;
+                    didWork = true;
+                } else if (!streamState.inThink && pendingDiagnosis) {
+                    setCursorTarget('diagnosis');
+                    const take = pendingDiagnosis.slice(0, step);
+                    pendingDiagnosis = pendingDiagnosis.slice(step);
+                    contentBuf += take;
+                    diagnosisText.textContent = contentBuf.replace(/^\\s+/, '');
+                    diagnosisStarted = diagnosisStarted || Boolean(diagnosisText.textContent.trim());
+                    didWork = true;
+                } else if (streamState.inThink) {
+                    setCursorTarget('reasoning');
+                } else if (diagnosisStarted) {
+                    setCursorTarget('diagnosis');
+                }
+
+                if (pendingReasoning || pendingDiagnosis) {
+                    flushRaf = requestAnimationFrame(flushStep);
+                    return;
+                }
+
+                flushRaf = null;
+                if (!didWork) {
+                    maybeFinishTyping();
+                }
+            }
 
             function scheduleFlush() {
-                if (flushTimer) return;
-                flushTimer = setInterval(() => {
-                    const step = 48;
-                    if (pendingDiagnosis) {
-                        const take = pendingDiagnosis.slice(0, step);
-                        pendingDiagnosis = pendingDiagnosis.slice(step);
-                        contentBuf += take;
-                        diagnosisText.textContent = contentBuf.replace(/^\\s+/, '');
-                    }
-                    if (pendingReasoning) {
-                        const take = pendingReasoning.slice(0, step);
-                        pendingReasoning = pendingReasoning.slice(step);
-                        reasoningBuf += take;
-                        reasoningText.textContent = reasoningBuf;
-                    }
-                    if (!pendingDiagnosis && !pendingReasoning) {
-                        clearInterval(flushTimer);
-                        flushTimer = null;
-                    }
-                }, 16);
+                if (flushRaf) return;
+                flushRaf = requestAnimationFrame(flushStep);
             }
 
             function revealIfNeeded() {
@@ -456,6 +496,9 @@ document.addEventListener('DOMContentLoaded', function() {
                         throw new Error(data.error);
                     }
                     if (data.done) {
+                        streamDone = true;
+                        scheduleFlush();
+                        maybeFinishTyping();
                         return;
                     }
                 }
@@ -532,14 +575,9 @@ document.addEventListener('DOMContentLoaded', function() {
                             if (!diagnosisText.textContent && !reasoningText.textContent) {
                                 diagnosisText.textContent = 'Model returned no content';
                             }
+                            streamDone = true;
                             scheduleFlush();
-                            const stopTimer = setInterval(() => {
-                                if (!pendingDiagnosis && !pendingReasoning && !flushTimer) {
-                                    reasoningText.classList.remove('streaming');
-                                    diagnosisText.classList.remove('streaming');
-                                    clearInterval(stopTimer);
-                                }
-                            }, 100);
+                            maybeFinishTyping();
                             if (pollPromise) await pollPromise;
                         } else if (eventType === 'error') {
                             const msg = (payload && payload.detail) ? payload.detail : 'Streaming error';
