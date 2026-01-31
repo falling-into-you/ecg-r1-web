@@ -3,38 +3,120 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ECG-R1 Inference</title>
+    <title>ECG-R1 Intelligent Diagnosis Platform</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-    <div class="container">
-        <h1>ECG-R1 Multimodal Inference</h1>
-        <p class="subtitle">Upload an ECG image and signal file for diagnosis</p>
-        
-        <form id="inferenceForm">
-            <div class="form-group">
-                <label for="imageInput">ECG Image (PNG/JPG):</label>
-                <input type="file" id="imageInput" name="image" accept="image/*" required>
+    <nav class="navbar">
+        <div class="nav-content">
+            <div class="logo">
+                <i class="fa-solid fa-heart-pulse"></i>
+                <span>ECG-R1 Platform</span>
             </div>
-            
-            <div class="form-group">
-                <label for="ecgInput">ECG Signal File:</label>
-                <input type="file" id="ecgInput" name="ecg" required>
+            <div class="nav-links">
+                <span class="status-badge"><i class="fa-solid fa-circle-check"></i> System Online</span>
             </div>
-            
-            <button type="submit" id="submitBtn">Run Inference</button>
-        </form>
-        
-        <div id="loading" class="hidden">
-            <div class="spinner"></div>
-            <p>Processing... This may take a moment.</p>
         </div>
-        
-        <div id="resultContainer" class="hidden">
-            <h2>Diagnosis Result</h2>
-            <div id="resultText" class="result-box"></div>
+    </nav>
+
+    <main class="main-container">
+        <div class="grid-layout">
+            <!-- Left Panel: Input -->
+            <section class="panel input-panel">
+                <div class="panel-header">
+                    <h2><i class="fa-solid fa-file-medical"></i> Patient Data Input</h2>
+                    <p>Upload ECG imagery and signal data for analysis</p>
+                </div>
+                
+                <form id="inferenceForm">
+                    <div class="upload-group">
+                        <label class="input-label">ECG Image</label>
+                        <div class="drop-zone" id="imageDropZone">
+                            <input type="file" id="imageInput" name="image" accept="image/*" required class="file-input">
+                            <div class="drop-content">
+                                <i class="fa-regular fa-image upload-icon"></i>
+                                <p class="upload-text">Drag & drop or click to upload ECG Image</p>
+                                <p class="file-name" id="imageFileName"></p>
+                            </div>
+                            <div class="image-preview-container hidden" id="imagePreviewContainer">
+                                <img id="imagePreview" src="" alt="ECG Preview">
+                                <button type="button" class="remove-btn" id="removeImageBtn"><i class="fa-solid fa-times"></i></button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="upload-group">
+                        <label class="input-label">ECG Signal File</label>
+                        <div class="file-select-box" id="ecgDropZone">
+                            <input type="file" id="ecgInput" name="ecg" required class="file-input">
+                            <div class="file-select-content">
+                                <i class="fa-solid fa-wave-square"></i>
+                                <span id="ecgFileName">Select .dat/.hea signal file...</span>
+                            </div>
+                            <button type="button" class="browse-btn">Browse</button>
+                        </div>
+                    </div>
+
+                    <button type="submit" id="submitBtn" class="analyze-btn">
+                        <span>Start Analysis</span>
+                        <i class="fa-solid fa-arrow-right"></i>
+                    </button>
+                </form>
+            </section>
+
+            <!-- Right Panel: Result -->
+            <section class="panel result-panel">
+                <div class="panel-header">
+                    <h2><i class="fa-solid fa-clipboard-user"></i> Clinical Diagnosis Report</h2>
+                    <div class="actions">
+                        <button class="icon-btn" title="Print Report"><i class="fa-solid fa-print"></i></button>
+                        <button class="icon-btn" title="Download JSON"><i class="fa-solid fa-download"></i></button>
+                    </div>
+                </div>
+
+                <div id="emptyState" class="empty-state">
+                    <div class="illustration">
+                        <i class="fa-solid fa-user-doctor"></i>
+                    </div>
+                    <h3>Ready for Diagnosis</h3>
+                    <p>Upload patient data on the left to generate a comprehensive clinical report.</p>
+                </div>
+
+                <div id="loadingState" class="loading-state hidden">
+                    <div class="pulse-ring"></div>
+                    <h3>Analyzing ECG Patterns...</h3>
+                    <p>The model is interpreting leads and identifying abnormalities.</p>
+                </div>
+
+                <div id="resultContent" class="result-content hidden">
+                    <div class="report-meta">
+                        <div class="meta-item">
+                            <span class="label">Date:</span>
+                            <span class="value" id="reportDate">--</span>
+                        </div>
+                        <div class="meta-item">
+                            <span class="label">Model:</span>
+                            <span class="value">ECG-R1-8B-v2</span>
+                        </div>
+                    </div>
+                    
+                    <div class="report-body">
+                        <div class="section-title">Findings & Diagnosis</div>
+                        <div id="resultText" class="diagnosis-text"></div>
+                    </div>
+
+                    <div class="disclaimer">
+                        <i class="fa-solid fa-circle-exclamation"></i>
+                        AI-generated report. Please review with a certified cardiologist.
+                    </div>
+                </div>
+            </section>
         </div>
-    </div>
+    </main>
 
     <script src="/static/script.js"></script>
 </body>
