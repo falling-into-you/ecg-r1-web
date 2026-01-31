@@ -116,8 +116,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 hour: '2-digit', minute: '2-digit'
             });
             
-            // Format text (simple handling)
-            resultText.textContent = data.result;
+            // Format text
+            const parsed = parseResult(data.result);
+            diagnosisText.textContent = parsed.diagnosis;
+            reasoningText.textContent = parsed.thinking || "No detailed reasoning process provided by the model.";
             
         } catch (error) {
             loadingState.classList.add('hidden');
