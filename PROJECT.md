@@ -72,6 +72,9 @@ Ubuntu 22.04 示例（需要 sudo 权限）：
 - `meta_info.model_display_name`：当前推理模型名称（与页面展示一致）
 - `feedback`：点赞/点踩会更新 `feedback`、`feedback_at`、`feedback_client`
 
+### Request ID 约定
+- `request_id` 格式：`YYYYMMDD-<uuid>`（用于在无需额外索引的情况下定位落盘目录与回写反馈）
+
 ## 待实现功能（Backlog）
 ### 产品与交互
 - 下载 JSON 按钮：导出本次 request 的 `data.json`

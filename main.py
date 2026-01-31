@@ -15,7 +15,6 @@ import threading
 import datetime
 import uuid
 import time
-import glob
 import ipaddress
 from contextlib import asynccontextmanager
 
@@ -80,20 +79,22 @@ def _client_geo(request: Request) -> dict:
 def _date_str() -> str:
     return datetime.datetime.now().date().isoformat()
 
+def _make_request_id(date_str: str) -> str:
+    compact = date_str.replace("-", "")
+    return f"{compact}-{uuid.uuid4()}"
+
+def _date_from_request_id(request_id: str) -> str:
+    if not request_id or len(request_id) < 9 or request_id[8] != "-":
+        raise ValueError("invalid request_id format")
+    compact = request_id[:8]
+    if not compact.isdigit():
+        raise ValueError("invalid request_id format")
+    return f"{compact[:4]}-{compact[4:6]}-{compact[6:8]}"
+
 def _make_request_dir(request_id: str, date_str: str) -> str:
     request_dir = os.path.join(DATA_COLLECTION_DIR, date_str, request_id)
     os.makedirs(request_dir, exist_ok=True)
     return request_dir
-
-def _find_request_dir(request_id: str) -> str | None:
-    legacy = os.path.join(DATA_COLLECTION_DIR, request_id)
-    if os.path.isdir(legacy):
-        return legacy
-    matches = glob.glob(os.path.join(DATA_COLLECTION_DIR, "*", request_id))
-    for m in matches:
-        if os.path.isdir(m):
-            return m
-    return None
 
 def add_log(msg):
     timestamp = datetime.datetime.now().strftime("%H:%M:%S")
@@ -238,8 +239,8 @@ async def predict(request: Request, image: Optional[UploadFile] = File(None), ec
     try:
         from swift.llm import InferRequest, RequestConfig
         
-        request_id = str(uuid.uuid4())
         date_str = _date_str()
+        request_id = _make_request_id(date_str)
         request_dir = _make_request_dir(request_id, date_str)
 
         inputs = {}
@@ -332,8 +333,8 @@ async def predict_stream(request: Request, image: Optional[UploadFile] = File(No
 
     from swift.llm import InferRequest, RequestConfig
 
-    request_id = str(uuid.uuid4())
     date_str = _date_str()
+    request_id = _make_request_id(date_str)
     request_dir = _make_request_dir(request_id, date_str)
     client_ip = _client_ip(request)
     client_geo = _client_geo(request)
@@ -511,9 +512,12 @@ async def submit_feedback(request: Request, data: dict = Body(...)):
     if not request_id or not feedback_type:
         raise HTTPException(status_code=400, detail="Missing request_id or feedback type")
         
-    request_dir = _find_request_dir(request_id)
-    if not request_dir:
-        raise HTTPException(status_code=404, detail="Request data not found")
+    try:
+        date_str = _date_from_request_id(request_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid request_id format")
+
+    request_dir = os.path.join(DATA_COLLECTION_DIR, date_str, request_id)
 
     json_path = os.path.join(request_dir, "data.json")
     
