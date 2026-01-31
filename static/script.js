@@ -421,6 +421,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (pendingReasoning || pendingDiagnosis || pendingAnswer) return;
                 if (flushRaf) return;
                 setCursorTarget('none');
+                diagnosisText.textContent = String(diagnosisText.textContent || '').replace(/^\s+/, '');
+                answerText.textContent = String(answerText.textContent || '').replace(/^\s+/, '');
                 if (!sawAnswer) {
                     answerSection.classList.add('hidden');
                     answerText.textContent = '';
