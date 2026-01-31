@@ -18,8 +18,11 @@ document.addEventListener('DOMContentLoaded', function() {
     const diagnosisText = document.getElementById('diagnosisText');
     const reasoningText = document.getElementById('reasoningText');
     const reportDate = document.getElementById('reportDate');
+    const requestIdValue = document.getElementById('requestIdValue');
+    const copyRequestIdBtn = document.getElementById('copyRequestIdBtn');
     const toggleReasoningBtn = document.getElementById('toggleReasoning');
-    // const reasoningContent = document.getElementById('reasoningContent'); // Removed toggle content var as we handle it differently now
+    const reasoningSection = document.querySelector('.reasoning-section');
+    const reasoningContent = document.getElementById('reasoningContent');
     
     // Feedback elements
     const feedbackSection = document.getElementById('feedbackSection');
@@ -27,6 +30,44 @@ document.addEventListener('DOMContentLoaded', function() {
     const dislikeBtn = document.getElementById('dislikeBtn');
     const feedbackMessage = document.getElementById('feedbackMessage');
     let currentRequestId = null;
+
+    async function copyToClipboard(text) {
+        const value = String(text || '').trim();
+        if (!value) return false;
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(value);
+            return true;
+        }
+        const textarea = document.createElement('textarea');
+        textarea.value = value;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        const ok = document.execCommand('copy');
+        document.body.removeChild(textarea);
+        return ok;
+    }
+
+    if (copyRequestIdBtn) {
+        copyRequestIdBtn.addEventListener('click', async () => {
+            try {
+                const ok = await copyToClipboard(currentRequestId || (requestIdValue && requestIdValue.textContent));
+                if (ok) {
+                    copyRequestIdBtn.title = 'Copied';
+                    setTimeout(() => { copyRequestIdBtn.title = 'Copy request id'; }, 1000);
+                }
+            } catch (e) {}
+        });
+    }
+
+    if (toggleReasoningBtn && reasoningSection && reasoningContent) {
+        toggleReasoningBtn.setAttribute('aria-expanded', 'true');
+        toggleReasoningBtn.addEventListener('click', () => {
+            const collapsed = reasoningSection.classList.toggle('collapsed');
+            toggleReasoningBtn.setAttribute('aria-expanded', String(!collapsed));
+        });
+    }
 
     const statusBadge = document.querySelector('.status-badge');
     let isSystemOnline = false;
@@ -245,6 +286,7 @@ document.addEventListener('DOMContentLoaded', function() {
             currentRequestId = null;
             submitBtn.innerHTML = '<span>Generating...</span>';
             const startedAt = Date.now();
+            if (requestIdValue) requestIdValue.textContent = requestIdHeader || '--';
 
             reportDate.textContent = new Date().toLocaleDateString('en-US', {
                 year: 'numeric', month: 'long', day: 'numeric',
@@ -262,6 +304,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 diagnosisText.textContent = parsed.diagnosis;
                 reasoningText.textContent = parsed.thinking || "No detailed reasoning process provided by the model.";
                 currentRequestId = data.request_id;
+                if (requestIdValue) requestIdValue.textContent = currentRequestId || '--';
                 return;
             }
 
@@ -271,7 +314,9 @@ document.addEventListener('DOMContentLoaded', function() {
             likeBtn.classList.remove('active', 'like');
             dislikeBtn.classList.remove('active', 'dislike');
             feedbackMessage.classList.add('hidden');
-            reasoningText.textContent = '生成中...';
+            reasoningText.textContent = 'Generating...';
+            reasoningText.classList.add('streaming');
+            diagnosisText.classList.add('streaming');
 
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
@@ -282,6 +327,33 @@ document.addEventListener('DOMContentLoaded', function() {
             const streamState = { inThink: false, carry: '' };
             let placeholderShown = true;
             let gotAnyChunk = false;
+            let usePolling = false;
+            let pendingDiagnosis = '';
+            let pendingReasoning = '';
+            let flushTimer = null;
+
+            function scheduleFlush() {
+                if (flushTimer) return;
+                flushTimer = setInterval(() => {
+                    const step = 48;
+                    if (pendingDiagnosis) {
+                        const take = pendingDiagnosis.slice(0, step);
+                        pendingDiagnosis = pendingDiagnosis.slice(step);
+                        contentBuf += take;
+                        diagnosisText.textContent = contentBuf.replace(/^\\s+/, '');
+                    }
+                    if (pendingReasoning) {
+                        const take = pendingReasoning.slice(0, step);
+                        pendingReasoning = pendingReasoning.slice(step);
+                        reasoningBuf += take;
+                        reasoningText.textContent = reasoningBuf;
+                    }
+                    if (!pendingDiagnosis && !pendingReasoning) {
+                        clearInterval(flushTimer);
+                        flushTimer = null;
+                    }
+                }, 16);
+            }
 
             function revealIfNeeded() {
                 if (revealed) return;
@@ -293,7 +365,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 feedbackMessage.classList.add('hidden');
                 revealed = true;
                 placeholderShown = true;
-                reasoningText.textContent = '生成中...';
+                reasoningText.textContent = 'Generating...';
             }
 
             function takeCarryPrefix(text) {
@@ -328,32 +400,32 @@ document.addEventListener('DOMContentLoaded', function() {
 
                     if (!streamState.inThink) {
                         if (openIdx === -1) {
-                            contentBuf += text;
-                            diagnosisText.textContent = contentBuf;
+                            pendingDiagnosis += text;
+                            scheduleFlush();
                             return;
                         }
                         const before = text.slice(0, openIdx);
                         if (before) {
-                            contentBuf += before;
-                            diagnosisText.textContent = contentBuf;
+                            pendingDiagnosis += before;
+                            scheduleFlush();
                         }
-                        reasoningBuf += '<think>';
-                        reasoningText.textContent = reasoningBuf;
+                        pendingReasoning += '<think>';
+                        scheduleFlush();
                         text = text.slice(openIdx + '<think>'.length);
                         streamState.inThink = true;
                     } else {
                         if (closeIdx === -1) {
-                            reasoningBuf += text;
-                            reasoningText.textContent = reasoningBuf;
+                            pendingReasoning += text;
+                            scheduleFlush();
                             return;
                         }
                         const before = text.slice(0, closeIdx);
                         if (before) {
-                            reasoningBuf += before;
-                            reasoningText.textContent = reasoningBuf;
+                            pendingReasoning += before;
+                            scheduleFlush();
                         }
-                        reasoningBuf += '</think>';
-                        reasoningText.textContent = reasoningBuf;
+                        pendingReasoning += '</think>';
+                        scheduleFlush();
                         text = text.slice(closeIdx + '</think>'.length);
                         streamState.inThink = false;
                     }
@@ -393,7 +465,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (requestIdHeader) {
                 setTimeout(() => {
                     if (!gotAnyChunk) {
-                        try { controller.abort(); } catch (e) {}
+                        usePolling = true;
                         pollPromise = pollProgress(requestIdHeader);
                     }
                 }, 5000);
@@ -419,19 +491,26 @@ document.addEventListener('DOMContentLoaded', function() {
                         let payload = dataStr;
                         try { payload = JSON.parse(dataStr); } catch (e) {}
 
+                        if (usePolling && (eventType === 'reasoning' || eventType === 'content')) {
+                            continue;
+                        }
+
                         if (eventType === 'reasoning') {
                             revealIfNeeded();
                             if (placeholderShown) {
                                 reasoningBuf = '';
+                                pendingReasoning = '';
                                 reasoningText.textContent = '';
                                 placeholderShown = false;
                             }
-                            reasoningBuf += payload;
-                            reasoningText.textContent = reasoningBuf;
+                            pendingReasoning += String(payload);
+                            scheduleFlush();
                             gotAnyChunk = true;
                         } else if (eventType === 'content') {
                             revealIfNeeded();
                             if (placeholderShown) {
+                                reasoningBuf = '';
+                                pendingReasoning = '';
                                 reasoningText.textContent = '';
                                 placeholderShown = false;
                             }
@@ -444,14 +523,23 @@ document.addEventListener('DOMContentLoaded', function() {
                         } else if (eventType === 'ping') {
                             if (placeholderShown) {
                                 const sec = Math.floor((Date.now() - startedAt) / 1000);
-                                reasoningText.textContent = `生成中... (${sec}s)`;
+                                reasoningText.textContent = `Generating... (${sec}s)`;
                             }
                         } else if (eventType === 'done') {
                             if (payload && payload.request_id) currentRequestId = payload.request_id;
+                            if (requestIdValue) requestIdValue.textContent = currentRequestId || (requestIdHeader || '--');
                             revealIfNeeded();
                             if (!diagnosisText.textContent && !reasoningText.textContent) {
-                                diagnosisText.textContent = '模型未返回内容';
+                                diagnosisText.textContent = 'Model returned no content';
                             }
+                            scheduleFlush();
+                            const stopTimer = setInterval(() => {
+                                if (!pendingDiagnosis && !pendingReasoning && !flushTimer) {
+                                    reasoningText.classList.remove('streaming');
+                                    diagnosisText.classList.remove('streaming');
+                                    clearInterval(stopTimer);
+                                }
+                            }, 100);
                             if (pollPromise) await pollPromise;
                         } else if (eventType === 'error') {
                             const msg = (payload && payload.detail) ? payload.detail : 'Streaming error';

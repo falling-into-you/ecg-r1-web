@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="/static/style.css?v=20260131-2">
+    <link rel="stylesheet" href="/static/style.css?v=20260131-5">
 </head>
 <body>
     <nav class="navbar">
@@ -29,7 +29,7 @@
             <section class="panel input-panel">
                 <div class="panel-header">
                     <h2><i class="fa-solid fa-file-medical"></i> Patient Data Input</h2>
-                    <p>Upload ECG imagery and signal data for analysis</p>
+                    <p>Supports three modalities: Image only / ECG signal only / Image + ECG signal</p>
                 </div>
                 
                 <form id="inferenceForm">
@@ -102,6 +102,15 @@
                             <span class="label">Model:</span>
                             <span class="value">{{ model_display_name }}</span>
                         </div>
+                        <div class="meta-item request-id">
+                            <span class="label">Request ID:</span>
+                            <div class="value-row">
+                                <span class="value mono" id="requestIdValue">--</span>
+                                <button type="button" class="copy-btn" id="copyRequestIdBtn" title="Copy request id">
+                                    <i class="fa-regular fa-copy"></i>
+                                </button>
+                            </div>
+                        </div>
                     </div>
                     
                     <div class="report-body">
@@ -109,6 +118,9 @@
                         <div class="reasoning-section">
                             <div class="section-header">
                                 <span><i class="fa-solid fa-brain"></i> AI Reasoning Process</span>
+                                <button type="button" class="icon-btn toggle-btn" id="toggleReasoning" title="Collapse/Expand">
+                                    <i class="fa-solid fa-chevron-up"></i>
+                                </button>
                             </div>
                             <div class="panel-content" id="reasoningContent">
                                 <div id="reasoningText" class="reasoning-text"></div>
@@ -146,6 +158,6 @@
         </div>
     </main>
 
-    <script src="/static/script.js?v=20260131-14"></script>
+    <script src="/static/script.js?v=20260131-17"></script>
 </body>
 </html>
