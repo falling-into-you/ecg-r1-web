@@ -31,12 +31,38 @@ DNS 解析无法直接携带端口；做法是让域名解析到服务器 IP，�
 
 Ubuntu 22.04 示例（需要 sudo 权限）：
 - 安装：`sudo apt update && sudo apt install -y nginx`
-- 放置配置：
+- 方案 A（推荐，最稳）：直接用 conf.d 接管 80（避免默认站点/Host 匹配问题）
+  - `sudo tee /etc/nginx/conf.d/ecg_r1_web.conf >/dev/null <<'EOF'`
+  - `server {`
+  - `    listen 80 default_server;`
+  - `    listen [::]:80 default_server;`
+  - `    server_name YOUR_DOMAIN.com _;`
+  - `    client_max_body_size 50m;`
+  - `    location / {`
+  - `        proxy_pass http://127.0.0.1:8000;`
+  - `        proxy_http_version 1.1;`
+  - `        proxy_set_header Host $host;`
+  - `        proxy_set_header X-Real-IP $remote_addr;`
+  - `        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`
+  - `        proxy_set_header X-Forwarded-Proto $scheme;`
+  - `        proxy_buffering off;`
+  - `        proxy_cache off;`
+  - `        proxy_read_timeout 3600;`
+  - `    }`
+  - `}`
+  - `EOF`
+  - `sudo nginx -t`
+  - `sudo systemctl restart nginx`
+  - 验证：
+    - `curl -s http://127.0.0.1:8000/status`
+    - `curl -s -H "Host: YOUR_DOMAIN.com" http://127.0.0.1/status`
+    - `curl -s -H "Host: YOUR_DOMAIN.com" http://127.0.0.1/ | head`
+  - 可选清理（避免混淆）：`sudo rm -f /etc/nginx/sites-enabled/default`
+  - 可选清理：`sudo rm -f /etc/nginx/sites-enabled/ecg-r1-web`
+- 方案 B：使用 sites-enabled（更容易被 default / server_name 影响，不推荐）
   - `sudo cp deploy/nginx/ecg-r1-web.conf /etc/nginx/sites-available/ecg-r1-web`
   - `sudo ln -sf /etc/nginx/sites-available/ecg-r1-web /etc/nginx/sites-enabled/ecg-r1-web`
-- 检查并重载：
-  - `sudo nginx -t`
-  - `sudo systemctl reload nginx`
+  - `sudo nginx -t && sudo systemctl reload nginx`
 
 ### 3) 关键参数（SSE/流式）
 为避免中间层缓冲导致“流式无输出”，配置里启用了：
