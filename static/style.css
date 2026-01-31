@@ -381,36 +381,28 @@ body {
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
     overflow: hidden;
+    margin-top: 1.5rem;
 }
 
-.accordion-btn {
+.section-header {
     width: 100%;
     padding: 1rem 1.5rem;
     background: #f8fafc;
-    border: none;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    cursor: pointer;
+    border-bottom: 1px solid var(--border-color);
     font-size: 0.95rem;
     font-weight: 600;
-    color: var(--text-muted);
-    transition: all 0.2s;
+    color: var(--text-main);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
 }
 
-.accordion-btn:hover {
-    background: #f1f5f9;
-    color: var(--primary-color);
-}
-
-.accordion-btn.active .arrow {
-    transform: rotate(180deg);
+.section-header i {
+    color: var(--secondary-color);
 }
 
 .panel-content {
     background: white;
-    border-top: 1px solid var(--border-color);
-    transition: max-height 0.2s ease-out;
 }
 
 .reasoning-text {

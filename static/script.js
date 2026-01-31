@@ -15,8 +15,11 @@ document.addEventListener('DOMContentLoaded', function() {
     const emptyState = document.getElementById('emptyState');
     const loadingState = document.getElementById('loadingState');
     const resultContent = document.getElementById('resultContent');
-    const resultText = document.getElementById('resultText');
+    const diagnosisText = document.getElementById('diagnosisText');
+    const reasoningText = document.getElementById('reasoningText');
     const reportDate = document.getElementById('reportDate');
+
+    // --- Helper Function to Parse Result ---
 
     // --- Image Upload Handling ---
     imageInput.addEventListener('change', function(e) {

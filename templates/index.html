@@ -105,19 +105,18 @@
                     </div>
                     
                     <div class="report-body">
-                        <!-- Final Diagnosis Section -->
+                        <!-- Diagnosis Section -->
                         <div class="diagnosis-section">
                             <div class="section-title"><i class="fa-solid fa-stethoscope"></i> Final Diagnosis</div>
                             <div id="diagnosisText" class="diagnosis-text"></div>
                         </div>
 
-                        <!-- Collapsible Reasoning Section -->
+                        <!-- Reasoning Section (Always Visible) -->
                         <div class="reasoning-section">
-                            <button class="accordion-btn" id="toggleReasoning">
+                            <div class="section-header">
                                 <span><i class="fa-solid fa-brain"></i> AI Reasoning Process</span>
-                                <i class="fa-solid fa-chevron-down arrow"></i>
-                            </button>
-                            <div class="panel-content hidden" id="reasoningContent">
+                            </div>
+                            <div class="panel-content" id="reasoningContent">
                                 <div id="reasoningText" class="reasoning-text"></div>
                             </div>
                         </div>
