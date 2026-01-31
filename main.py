@@ -68,7 +68,13 @@ templates = Jinja2Templates(directory="templates")
 async def read_root(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
-from typing import Optional
+@app.get("/status")
+async def get_status():
+    if engine is None:
+        return JSONResponse(content={"status": "offline", "detail": "Model not loaded"})
+    return JSONResponse(content={"status": "online", "detail": "System ready"})
+
+@app.post("/predict")from typing import Optional
 
 @app.post("/predict")
 async def predict(image: Optional[UploadFile] = File(None), ecg: Optional[UploadFile] = File(None)):

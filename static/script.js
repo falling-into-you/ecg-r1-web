@@ -18,6 +18,35 @@ document.addEventListener('DOMContentLoaded', function() {
     const diagnosisText = document.getElementById('diagnosisText');
     const reasoningText = document.getElementById('reasoningText');
     const reportDate = document.getElementById('reportDate');
+    const reasoningContent = document.getElementById('reasoningContent');
+    const statusBadge = document.querySelector('.status-badge');
+    let isSystemOnline = false;
+
+    // --- Check System Status ---
+    async function checkSystemStatus() {
+        try {
+            const response = await fetch('/status');
+            const data = await response.json();
+            
+            if (data.status === 'online') {
+                isSystemOnline = true;
+                statusBadge.classList.remove('offline');
+                statusBadge.innerHTML = '<i class="fa-solid fa-circle-check"></i> System Online';
+            } else {
+                isSystemOnline = false;
+                statusBadge.classList.add('offline');
+                statusBadge.innerHTML = '<i class="fa-solid fa-circle-xmark"></i> System Offline';
+            }
+        } catch (error) {
+            console.error('Failed to check status:', error);
+            isSystemOnline = false;
+            statusBadge.classList.add('offline');
+            statusBadge.innerHTML = '<i class="fa-solid fa-circle-exclamation"></i> Connection Error';
+        }
+    }
+    
+    // Check status immediately
+    checkSystemStatus();
 
     // --- Helper Function to Parse Result ---
 
