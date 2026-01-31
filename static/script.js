@@ -36,6 +36,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const feedbackComment = document.getElementById('feedbackComment');
     const feedbackSubmitBtn = document.getElementById('feedbackSubmitBtn');
     let currentRequestId = null;
+    let isAnalysisComplete = false;
     let pendingFeedbackType = null;
 
     async function copyToClipboard(text) {
@@ -134,17 +135,25 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     likeBtn.addEventListener('click', () => {
-        if (!currentRequestId) {
+        if (!isAnalysisComplete) {
             alert('Please wait until the analysis completes before submitting feedback.');
             return;
+        }
+        if (!currentRequestId && requestIdValue && requestIdValue.textContent) {
+            const value = String(requestIdValue.textContent || '').trim();
+            if (value && value !== '--') currentRequestId = value;
         }
         openFeedbackDetail('like');
     });
 
     dislikeBtn.addEventListener('click', () => {
-        if (!currentRequestId) {
+        if (!isAnalysisComplete) {
             alert('Please wait until the analysis completes before submitting feedback.');
             return;
+        }
+        if (!currentRequestId && requestIdValue && requestIdValue.textContent) {
+            const value = String(requestIdValue.textContent || '').trim();
+            if (value && value !== '--') currentRequestId = value;
         }
         openFeedbackDetail('dislike');
     });
@@ -329,6 +338,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // --- Form Submission ---
     form.addEventListener('submit', async function(e) {
         e.preventDefault();
+        isAnalysisComplete = false;
         
         // Validate inputs: At least one must be provided
         if (!imageInput.files[0] && !ecgInput.files[0]) {
@@ -398,6 +408,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 currentRequestId = data.request_id;
                 if (requestIdValue) requestIdValue.textContent = currentRequestId || '--';
+                isAnalysisComplete = true;
                 return;
             }
 
@@ -737,11 +748,17 @@ document.addEventListener('DOMContentLoaded', function() {
                             }
                         } else if (eventType === 'done') {
                             if (payload && payload.request_id) currentRequestId = payload.request_id;
+                            if (!currentRequestId && requestIdHeader) currentRequestId = requestIdHeader;
+                            if (!currentRequestId && requestIdValue && requestIdValue.textContent) {
+                                const value = String(requestIdValue.textContent || '').trim();
+                                if (value && value !== '--') currentRequestId = value;
+                            }
                             if (requestIdValue) requestIdValue.textContent = currentRequestId || (requestIdHeader || '--');
                             revealIfNeeded();
                             if (!diagnosisText.textContent && !reasoningText.textContent) {
                                 diagnosisText.textContent = 'Model returned no content';
                             }
+                            isAnalysisComplete = true;
                             streamDone = true;
                             scheduleFlush();
                             maybeFinishTyping();
