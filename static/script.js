@@ -31,7 +31,12 @@ document.addEventListener('DOMContentLoaded', function() {
     const likeBtn = document.getElementById('likeBtn');
     const dislikeBtn = document.getElementById('dislikeBtn');
     const feedbackMessage = document.getElementById('feedbackMessage');
+    const feedbackDetail = document.getElementById('feedbackDetail');
+    const feedbackDetailTitle = document.getElementById('feedbackDetailTitle');
+    const feedbackComment = document.getElementById('feedbackComment');
+    const feedbackSubmitBtn = document.getElementById('feedbackSubmitBtn');
     let currentRequestId = null;
+    let pendingFeedbackType = null;
 
     async function copyToClipboard(text) {
         const value = String(text || '').trim();
@@ -74,46 +79,79 @@ document.addEventListener('DOMContentLoaded', function() {
     const statusBadge = document.querySelector('.status-badge');
     let isSystemOnline = false;
 
-    // --- Feedback Handling ---
-    async function sendFeedback(type) {
-        if (!currentRequestId) return;
-        
+    function openFeedbackDetail(type) {
+        pendingFeedbackType = type;
+        feedbackMessage.classList.add('hidden');
+        feedbackSubmitBtn.disabled = false;
+
+        if (type === 'like') {
+            likeBtn.classList.add('active', 'like');
+            dislikeBtn.classList.remove('active', 'dislike');
+            feedbackDetailTitle.textContent = 'You marked this interpretation as Helpful.';
+        } else {
+            dislikeBtn.classList.add('active', 'dislike');
+            likeBtn.classList.remove('active', 'like');
+            feedbackDetailTitle.textContent = 'You marked this interpretation as Not Helpful.';
+        }
+
+        feedbackDetail.classList.remove('hidden');
+        if (feedbackComment) feedbackComment.focus();
+    }
+
+    async function submitFeedback() {
+        if (!currentRequestId || !pendingFeedbackType) return;
+
+        feedbackSubmitBtn.disabled = true;
         try {
+            const text = (feedbackComment && feedbackComment.value) ? String(feedbackComment.value).trim() : '';
             const response = await fetch('/feedback', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     request_id: currentRequestId,
-                    feedback: type
+                    feedback: pendingFeedbackType,
+                    comment: text || null
                 })
             });
-            
-            if (response.ok) {
-                feedbackMessage.classList.remove('hidden');
-                
-                // Update UI state
-                if (type === 'like') {
-                    likeBtn.classList.add('active', 'like');
-                    dislikeBtn.classList.remove('active', 'dislike');
-                } else {
-                    dislikeBtn.classList.add('active', 'dislike');
-                    likeBtn.classList.remove('active', 'like');
-                }
-                
-                // Disable buttons after selection (optional, here we allow changing mind)
-                // likeBtn.disabled = true;
-                // dislikeBtn.disabled = true;
+
+            if (!response.ok) {
+                let detail = 'Failed to submit feedback';
+                try {
+                    const data = await response.json();
+                    detail = data.detail || detail;
+                } catch (e) {}
+                throw new Error(detail);
             }
+
+            feedbackMessage.classList.remove('hidden');
+            if (feedbackComment) feedbackComment.value = '';
+            feedbackDetail.classList.add('hidden');
         } catch (error) {
-            console.error('Error sending feedback:', error);
-            alert('Failed to submit feedback');
+            alert('Error: ' + (error && error.message ? error.message : String(error)));
+        } finally {
+            feedbackSubmitBtn.disabled = false;
         }
     }
 
-    likeBtn.addEventListener('click', () => sendFeedback('like'));
-    dislikeBtn.addEventListener('click', () => sendFeedback('dislike'));
+    likeBtn.addEventListener('click', () => {
+        if (!currentRequestId) {
+            alert('Please wait until the analysis completes before submitting feedback.');
+            return;
+        }
+        openFeedbackDetail('like');
+    });
+
+    dislikeBtn.addEventListener('click', () => {
+        if (!currentRequestId) {
+            alert('Please wait until the analysis completes before submitting feedback.');
+            return;
+        }
+        openFeedbackDetail('dislike');
+    });
+
+    if (feedbackSubmitBtn) {
+        feedbackSubmitBtn.addEventListener('click', submitFeedback);
+    }
 
     // --- Check System Status ---
     async function checkSystemStatus() {

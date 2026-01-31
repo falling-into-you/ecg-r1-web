@@ -91,7 +91,7 @@ Ubuntu 22.04 示例（需要 sudo 权限）：
 - Reasoning 可折叠/展开
 - 结果展示分区：Interpretation Summary (原 Final Diagnosis) + Final Answer (新)
 - 流式输出动效：打字机逐步追加 + 光标闪烁（完成后停止）
-- Like / Dislike 反馈：`/feedback` 写入对应 request 的 `data.json`
+- Like / Dislike 反馈：点击后弹出反馈框，可填写可选文本并提交；`/feedback` 写入对应 request 的 `data.json`
 
 ### 数据落盘
 - 推理请求会在 `data_collection/YYYY-MM-DD/{request_id}/` 保存：
@@ -103,7 +103,7 @@ Ubuntu 22.04 示例（需要 sudo 权限）：
 - `client.ip`：用户 IP（优先读 `X-Forwarded-For`，否则使用直连 IP）
 - `client.geo`：地区信息（从请求头读取：`CF-IPCountry` / `X-Geo-*` 等；未提供则为空）
 - `meta_info.model_display_name`：当前推理模型名称（与页面展示一致）
-- `feedback`：点赞/点踩会更新 `feedback`、`feedback_at`、`feedback_client`
+- `feedback`：点赞/点踩会更新 `feedback`、`feedback_at`、`feedback_client`，可选记录 `feedback_comment`
 
 ### Request ID 约定
 - `request_id` 格式：`YYYYMMDD-<uuid>`（用于在无需额外索引的情况下定位落盘目录与回写反馈）

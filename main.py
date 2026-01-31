@@ -571,6 +571,7 @@ async def predict_progress(request_id: str):
 async def submit_feedback(request: Request, data: dict = Body(...)):
     request_id = data.get("request_id")
     feedback_type = data.get("feedback")  # "like" or "dislike"
+    feedback_comment = data.get("comment")
     
     if not request_id or not feedback_type:
         raise HTTPException(status_code=400, detail="Missing request_id or feedback type")
@@ -598,6 +599,9 @@ async def submit_feedback(request: Request, data: dict = Body(...)):
             "geo": _client_geo(request),
             "user_agent": request.headers.get("user-agent"),
         }
+        if isinstance(feedback_comment, str):
+            trimmed = feedback_comment.strip()
+            record["feedback_comment"] = trimmed if trimmed else None
         
         with open(json_path, "w") as f:
             json.dump(record, f, indent=4, ensure_ascii=False)
