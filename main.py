@@ -68,37 +68,46 @@ templates = Jinja2Templates(directory="templates")
 async def read_root(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
+from typing import Optional
+
 @app.post("/predict")
-async def predict(image: UploadFile = File(...), ecg: UploadFile = File(...)):
+async def predict(image: Optional[UploadFile] = File(None), ecg: Optional[UploadFile] = File(None)):
     if engine is None:
         raise HTTPException(status_code=500, detail="Model not loaded")
+    
+    if not image and not ecg:
+        raise HTTPException(status_code=400, detail="Please provide at least one input (Image or ECG signal).")
     
     try:
         from swift.llm import InferRequest, RequestConfig
         
-        # Save files
-        image_path = os.path.join(config.UPLOAD_DIR, image.filename)
-        ecg_path = os.path.join(config.UPLOAD_DIR, ecg.filename)
+        images_list = []
+        objects_dict = {}
+        prompt_tags = ""
         
-        with open(image_path, "wb") as f:
-            shutil.copyfileobj(image.file, f)
-        with open(ecg_path, "wb") as f:
-            shutil.copyfileobj(ecg.file, f)
+        # Handle ECG file
+        if ecg:
+            ecg_path = os.path.join(config.UPLOAD_DIR, ecg.filename)
+            with open(ecg_path, "wb") as f:
+                shutil.copyfileobj(ecg.file, f)
+            objects_dict['ecg'] = [ecg_path]
+            prompt_tags += "<ecg>"
             
-        # Construct input
-        # Note: The model expects specific object format
-        # objects: {'ecg': [path]}
-        # messages content: <ecg><image>\nPrompt...
-        
-        prompt = "<ecg><image>\nInterpret the provided ECG image, identify key features and abnormalities in each lead, and generate a clinical diagnosis that is supported by the observed evidence."
-        
-        # The engine expects absolute paths or paths relative to ROOT_IMAGE_DIR/ROOT_ECG_DIR
-        # We set ROOT dirs to "/" in config, so we can use absolute paths.
+        # Handle Image file
+        if image:
+            image_path = os.path.join(config.UPLOAD_DIR, image.filename)
+            with open(image_path, "wb") as f:
+                shutil.copyfileobj(image.file, f)
+            images_list.append(image_path)
+            prompt_tags += "<image>"
+            
+        # Construct prompt
+        prompt = f"{prompt_tags}\nInterpret the provided data, identify key features and abnormalities, and generate a clinical diagnosis that is supported by the observed evidence."
         
         infer_request = InferRequest(
             messages=[{'role': 'user', 'content': prompt}],
-            images=[image_path],
-            objects={'ecg': [ecg_path]}
+            images=images_list,
+            objects=objects_dict
         )
         
         request_config = RequestConfig(temperature=0.0, max_tokens=2048, top_p=0, top_k=0, repetition_penalty=1.0)

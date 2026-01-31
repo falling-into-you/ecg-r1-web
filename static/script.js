@@ -78,6 +78,12 @@ document.addEventListener('DOMContentLoaded', function() {
     form.addEventListener('submit', async function(e) {
         e.preventDefault();
         
+        // Validate inputs: At least one must be provided
+        if (!imageInput.files[0] && !ecgInput.files[0]) {
+            alert('Please provide at least one input (Image or ECG Signal File) to proceed.');
+            return;
+        }
+
         // UI Updates
         submitBtn.disabled = true;
         submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Processing...';
