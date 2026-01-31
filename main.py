@@ -74,8 +74,6 @@ async def get_status():
         return JSONResponse(content={"status": "offline", "detail": "Model not loaded"})
     return JSONResponse(content={"status": "online", "detail": "System ready"})
 
-@app.post("/predict")from typing import Optional
-
 @app.post("/predict")
 async def predict(image: Optional[UploadFile] = File(None), ecg: Optional[UploadFile] = File(None)):
     if engine is None:
