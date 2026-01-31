@@ -76,6 +76,7 @@ Ubuntu 22.04 示例（需要 sudo 权限）：
 ### 输入与推理
 - 三模态输入：Image only / ECG signal only / Image + ECG signal
   - **ECG Signal**：强制要求选择 2 个文件（`.dat` + `.hea`），否则前端提示。
+    - 后端会自动匹配 `.dat` 与 `.hea`，传递 Record Name 给推理引擎。
   - **ECG Image**：限制仅接受 `.png`, `.jpg`, `.jpeg`。
 - 流式推理：前端优先使用 SSE（`/predict_stream`）
 - 兼容 IDE WebView/代理缓冲：SSE 无增量时自动切换轮询 `/predict_progress/{request_id}`

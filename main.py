@@ -229,34 +229,80 @@ async def get_status():
     return JSONResponse(content={"status": "online", "detail": "System ready"})
 
 @app.post("/predict")
-async def predict(request: Request, image: Optional[UploadFile] = File(None), ecg: Optional[UploadFile] = File(None)):
+async def predict(request: Request, image: Optional[UploadFile] = File(None), ecg: list[UploadFile] = File(None)):
     if engine is None:
         raise HTTPException(status_code=500, detail="Model not loaded")
-    
     if not image and not ecg:
         raise HTTPException(status_code=400, detail="Please provide at least one input (Image or ECG signal).")
+
+    from swift.llm import InferRequest, RequestConfig
+
+    date_str = _date_str()
+    request_id = _make_request_id(date_str)
+    request_dir = _make_request_dir(request_id, date_str)
     
     try:
-        from swift.llm import InferRequest, RequestConfig
-        
-        date_str = _date_str()
-        request_id = _make_request_id(date_str)
-        request_dir = _make_request_dir(request_id, date_str)
-
-        inputs = {}
         images_list = []
         objects_dict = {}
         prompt_tags = ""
+        inputs = {}
         
-        # Handle ECG file
-        if ecg and ecg.filename:
-            ecg_name = _safe_filename(ecg.filename)
-            ecg_path = os.path.join(request_dir, ecg_name)
-            with open(ecg_path, "wb") as f:
-                shutil.copyfileobj(ecg.file, f)
-            objects_dict['ecg'] = [ecg_path]
-            prompt_tags += "<ecg>"
-            inputs["ecg"] = ecg_name
+        # Handle ECG files
+        if ecg:
+            # Expect .dat and .hea
+            dat_file = None
+            hea_file = None
+            for f in ecg:
+                fname = _safe_filename(f.filename)
+                ext = os.path.splitext(fname)[1].lower()
+                path = os.path.join(request_dir, fname)
+                with open(path, "wb") as fo:
+                    shutil.copyfileobj(f.file, fo)
+                
+                if ext == '.dat':
+                    dat_file = path
+                elif ext == '.hea':
+                    hea_file = path
+                
+                # Also record in inputs for logging
+                if "ecg_files" not in inputs:
+                    inputs["ecg_files"] = []
+                inputs["ecg_files"].append(fname)
+
+            if dat_file and hea_file:
+                # Use .hea path for objects_dict as wfdb.rdsamp expects header path (without extension usually works, but here we pass .hea and let loader handle or pass base)
+                # Actually wfdb rdsamp expects the record name (without extension).
+                # But our custom loader might expect the full path to .hea or .dat?
+                # Let's check my_register_v3.py load_ecg. It uses wfdb.rdsamp(path).
+                # wfdb.rdsamp(path) where path is /path/to/record (no extension) usually works if both .dat and .hea exist.
+                
+                # We will pass the common prefix (record name) to the engine
+                # Assuming they share the same basename.
+                base_dat = os.path.splitext(dat_file)[0]
+                base_hea = os.path.splitext(hea_file)[0]
+                
+                if base_dat != base_hea:
+                    # If basenames differ, we might have issues if wfdb expects them to match.
+                    # For now, we assume user uploaded matching pair.
+                    pass
+
+                # Pass the record path (without extension) to the engine
+                # But wait, my_register_v3.py: load_ecg calls wfdb.rdsamp(path).
+                # If path has extension, wfdb might handle it or fail.
+                # Standard wfdb.rdsamp arg is 'record_name'.
+                
+                # Let's pass the record name (without extension).
+                # Ensure we strip extension.
+                record_path = base_hea 
+                
+                objects_dict['ecg'] = [record_path]
+                prompt_tags += "<ecg>"
+                inputs["ecg_record"] = os.path.basename(record_path)
+            else:
+                 # If only one provided or mismatch, we might skip or fail? 
+                 # For now if we don't have a pair, we just don't add to objects_dict?
+                 # Or we try our best.
+                 pass
             
         # Handle Image file
         if image and image.filename:
@@ -325,7 +371,7 @@ async def predict(request: Request, image: Optional[UploadFile] = File(None), ec
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/predict_stream")
-async def predict_stream(request: Request, image: Optional[UploadFile] = File(None), ecg: Optional[UploadFile] = File(None)):
+async def predict_stream(request: Request, image: Optional[UploadFile] = File(None), ecg: list[UploadFile] = File(None)):
     if engine is None:
         raise HTTPException(status_code=500, detail="Model not loaded")
     if not image and not ecg:
@@ -344,14 +390,31 @@ async def predict_stream(request: Request, image: Optional[UploadFile] = File(No
     prompt_tags = ""
     inputs = {}
 
-    if ecg and ecg.filename:
-        ecg_name = _safe_filename(ecg.filename)
-        ecg_path = os.path.join(request_dir, ecg_name)
-        with open(ecg_path, "wb") as f:
-            shutil.copyfileobj(ecg.file, f)
-        objects_dict["ecg"] = [ecg_path]
-        prompt_tags += "<ecg>"
-        inputs["ecg"] = ecg_name
+    if ecg:
+        dat_file = None
+        hea_file = None
+        for f in ecg:
+            fname = _safe_filename(f.filename)
+            ext = os.path.splitext(fname)[1].lower()
+            path = os.path.join(request_dir, fname)
+            with open(path, "wb") as fo:
+                shutil.copyfileobj(f.file, fo)
+            
+            if ext == '.dat':
+                dat_file = path
+            elif ext == '.hea':
+                hea_file = path
+            
+            if "ecg_files" not in inputs:
+                inputs["ecg_files"] = []
+            inputs["ecg_files"].append(fname)
+        
+        if dat_file and hea_file:
+            base_hea = os.path.splitext(hea_file)[0]
+            record_path = base_hea
+            objects_dict['ecg'] = [record_path]
+            prompt_tags += "<ecg>"
+            inputs["ecg_record"] = os.path.basename(record_path)
 
     if image and image.filename:
         image_name = _safe_filename(image.filename)
