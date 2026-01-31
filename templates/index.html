@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ECG-R1 Inference</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>ECG-R1 Multimodal Inference</h1>
+        <p class="subtitle">Upload an ECG image and signal file for diagnosis</p>
+        
+        <form id="inferenceForm">
+            <div class="form-group">
+                <label for="imageInput">ECG Image (PNG/JPG):</label>
+                <input type="file" id="imageInput" name="image" accept="image/*" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="ecgInput">ECG Signal File:</label>
+                <input type="file" id="ecgInput" name="ecg" required>
+            </div>
+            
+            <button type="submit" id="submitBtn">Run Inference</button>
+        </form>
+        
+        <div id="loading" class="hidden">
+            <div class="spinner"></div>
+            <p>Processing... This may take a moment.</p>
+        </div>
+        
+        <div id="resultContainer" class="hidden">
+            <h2>Diagnosis Result</h2>
+            <div id="resultText" class="result-box"></div>
+        </div>
+    </div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>
