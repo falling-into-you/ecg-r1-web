@@ -398,6 +398,23 @@ body {
     font-size: 1.05rem;
 }
 
+.answer-section {
+    margin-top: 1.5rem;
+    margin-bottom: 2rem;
+}
+
+.answer-text {
+    font-family: 'Inter', sans-serif;
+    line-height: 1.7;
+    color: var(--text-main);
+    white-space: pre-wrap;
+    background: #eff6ff;
+    padding: 0.85rem 1.25rem 1.25rem;
+    border-radius: var(--radius-md);
+    border-left: 4px solid var(--primary-color);
+    font-size: 1.05rem;
+}
+
 .reasoning-section {
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
@@ -458,7 +475,8 @@ body {
 }
 
 .reasoning-text.streaming::after,
-.diagnosis-text.streaming::after {
+.diagnosis-text.streaming::after,
+.answer-text.streaming::after {
     content: '';
     display: inline-block;
     width: 2px;
@@ -471,6 +489,10 @@ body {
 
 .diagnosis-text.streaming::after {
     background: var(--success-color);
+}
+
+.answer-text.streaming::after {
+    background: var(--primary-color);
 }
 
 @keyframes blink {

@@ -463,9 +463,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
 
                 flushRaf = null;
-                if (!didWork) {
-                    maybeFinishTyping();
-                }
+                maybeFinishTyping();
             }
 
             function scheduleFlush() {
