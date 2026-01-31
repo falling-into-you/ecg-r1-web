@@ -19,6 +19,33 @@
 - 在会话内启动 uvicorn（同上）
 - 退出但保持后台：`Ctrl-b d`
 
+## Nginx 部署（域名代理到 8000）
+DNS 解析无法直接携带端口；做法是让域名解析到服务器 IP，然后用 Nginx 在 80/443 端口反向代理到 `127.0.0.1:8000`。
+
+### 1) DNS
+- 添加 A 记录：`YOUR_DOMAIN` → 服务器公网 IPv4
+- 可选：添加 AAAA 记录（IPv6）
+
+### 2) Nginx 配置
+仓库内提供示例配置：`deploy/nginx/ecg-r1-web.conf`，需要把 `YOUR_DOMAIN.com` 替换为真实域名。
+
+Ubuntu 22.04 示例（需要 sudo 权限）：
+- 安装：`sudo apt update && sudo apt install -y nginx`
+- 放置配置：
+  - `sudo cp deploy/nginx/ecg-r1-web.conf /etc/nginx/sites-available/ecg-r1-web`
+  - `sudo ln -sf /etc/nginx/sites-available/ecg-r1-web /etc/nginx/sites-enabled/ecg-r1-web`
+- 检查并重载：
+  - `sudo nginx -t`
+  - `sudo systemctl reload nginx`
+
+### 3) 关键参数（SSE/流式）
+为避免中间层缓冲导致“流式无输出”，配置里启用了：
+- `proxy_buffering off`
+- `proxy_read_timeout 3600`
+
+### 4) HTTPS（可选）
+建议用 certbot 配置 443，并将 80 重定向到 https，再把 https 反代到 8000。
+
 ## 已实现功能（当前版本）
 ### 输入与推理
 - 三模态输入：Image only / ECG signal only / Image + ECG signal
