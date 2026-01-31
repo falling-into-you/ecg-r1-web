@@ -373,7 +373,8 @@ document.addEventListener('DOMContentLoaded', function() {
             reasoningText.classList.add('streaming');
             diagnosisText.classList.remove('streaming');
             answerText.classList.remove('streaming');
-            answerSection.classList.add('hidden'); // Hide initially, show if answer detected
+            answerSection.classList.remove('hidden');
+            answerText.textContent = '';
 
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
@@ -383,6 +384,8 @@ document.addEventListener('DOMContentLoaded', function() {
             let answerBuf = '';
             let rawProcessedLen = 0;
             const streamState = { inThink: false, inAnswer: false, carry: '' };
+            let sawAnswer = false;
+            let answerPlaceholderShown = true;
             let placeholderShown = true;
             let gotAnyChunk = false;
             let usePolling = false;
@@ -418,6 +421,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (pendingReasoning || pendingDiagnosis || pendingAnswer) return;
                 if (flushRaf) return;
                 setCursorTarget('none');
+                if (!sawAnswer) {
+                    answerSection.classList.add('hidden');
+                    answerText.textContent = '';
+                }
             }
 
             function flushStep() {
@@ -435,6 +442,11 @@ document.addEventListener('DOMContentLoaded', function() {
                     setCursorTarget('answer');
                     if (answerSection.classList.contains('hidden')) {
                          answerSection.classList.remove('hidden');
+                    }
+                    if (answerPlaceholderShown) {
+                        answerPlaceholderShown = false;
+                        answerBuf = '';
+                        answerText.textContent = '';
                     }
                     const take = pendingAnswer.slice(0, step);
                     pendingAnswer = pendingAnswer.slice(step);
@@ -575,6 +587,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         pendingReasoning += '</think>';
                     } else if (tag === '<answer>') {
                         streamState.inAnswer = true;
+                        sawAnswer = true;
                         // Don't show <answer> tag in UI, just switch buffer
                     } else if (tag === '</answer>') {
                         streamState.inAnswer = false;
