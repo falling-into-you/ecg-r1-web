@@ -122,9 +122,24 @@
                         </div>
                     </div>
 
-                    <div class="disclaimer">
-                        <i class="fa-solid fa-circle-exclamation"></i>
-                        AI-generated report. Please review with a certified cardiologist.
+                        <div class="disclaimer">
+                            <i class="fa-solid fa-circle-exclamation"></i>
+                            AI-generated interpretation. Please review with a certified cardiologist.
+                        </div>
+
+                        <!-- Feedback Section -->
+                        <div class="feedback-section hidden" id="feedbackSection">
+                            <p>Was this interpretation helpful?</p>
+                            <div class="feedback-buttons">
+                                <button class="feedback-btn" id="likeBtn" title="Helpful">
+                                    <i class="fa-regular fa-thumbs-up"></i>
+                                </button>
+                                <button class="feedback-btn" id="dislikeBtn" title="Not Helpful">
+                                    <i class="fa-regular fa-thumbs-down"></i>
+                                </button>
+                            </div>
+                            <span id="feedbackMessage" class="feedback-message hidden">Thank you for your feedback!</span>
+                        </div>
                     </div>
                 </div>
             </section>

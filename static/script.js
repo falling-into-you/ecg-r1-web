@@ -18,9 +18,59 @@ document.addEventListener('DOMContentLoaded', function() {
     const diagnosisText = document.getElementById('diagnosisText');
     const reasoningText = document.getElementById('reasoningText');
     const reportDate = document.getElementById('reportDate');
-    const reasoningContent = document.getElementById('reasoningContent');
+    const toggleReasoningBtn = document.getElementById('toggleReasoning');
+    // const reasoningContent = document.getElementById('reasoningContent'); // Removed toggle content var as we handle it differently now
+    
+    // Feedback elements
+    const feedbackSection = document.getElementById('feedbackSection');
+    const likeBtn = document.getElementById('likeBtn');
+    const dislikeBtn = document.getElementById('dislikeBtn');
+    const feedbackMessage = document.getElementById('feedbackMessage');
+    let currentRequestId = null;
+
     const statusBadge = document.querySelector('.status-badge');
     let isSystemOnline = false;
+
+    // --- Feedback Handling ---
+    async function sendFeedback(type) {
+        if (!currentRequestId) return;
+        
+        try {
+            const response = await fetch('/feedback', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    request_id: currentRequestId,
+                    feedback: type
+                })
+            });
+            
+            if (response.ok) {
+                feedbackMessage.classList.remove('hidden');
+                
+                // Update UI state
+                if (type === 'like') {
+                    likeBtn.classList.add('active', 'like');
+                    dislikeBtn.classList.remove('active', 'dislike');
+                } else {
+                    dislikeBtn.classList.add('active', 'dislike');
+                    likeBtn.classList.remove('active', 'like');
+                }
+                
+                // Disable buttons after selection (optional, here we allow changing mind)
+                // likeBtn.disabled = true;
+                // dislikeBtn.disabled = true;
+            }
+        } catch (error) {
+            console.error('Error sending feedback:', error);
+            alert('Failed to submit feedback');
+        }
+    }
+
+    likeBtn.addEventListener('click', () => sendFeedback('like'));
+    dislikeBtn.addEventListener('click', () => sendFeedback('dislike'));
 
     // --- Check System Status ---
     async function checkSystemStatus() {
@@ -141,6 +191,14 @@ document.addEventListener('DOMContentLoaded', function() {
             // Success
             loadingState.classList.add('hidden');
             resultContent.classList.remove('hidden');
+            
+            // Show Feedback Section
+            feedbackSection.classList.remove('hidden');
+            // Reset feedback state
+            likeBtn.classList.remove('active', 'like');
+            dislikeBtn.classList.remove('active', 'dislike');
+            feedbackMessage.classList.add('hidden');
+            currentRequestId = data.request_id;
             
             // Update Report
             reportDate.textContent = new Date().toLocaleDateString('en-US', {

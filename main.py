@@ -121,11 +121,70 @@ async def predict(image: Optional[UploadFile] = File(None), ecg: Optional[Upload
         resp_list = engine.infer([infer_request], request_config)
         result_text = resp_list[0].choices[0].message.content
         
-        return JSONResponse(content={"result": result_text})
+        # --- Data Collection ---
+        request_id = str(uuid.uuid4())
+        request_dir = os.path.join(DATA_COLLECTION_DIR, request_id)
+        os.makedirs(request_dir, exist_ok=True)
+        
+        collected_info = {
+            "request_id": request_id,
+            "timestamp": datetime.datetime.now().isoformat(),
+            "inputs": {},
+            "model_output": result_text,
+            "meta_info": {
+                "model_path": config.MODEL_PATH,
+                "ecg_tower_path": config.ECG_TOWER_PATH
+            },
+            "feedback": None
+        }
+
+        # Save input files to collection dir
+        if image:
+            saved_image_path = os.path.join(request_dir, image.filename)
+            shutil.copy2(image_path, saved_image_path)
+            collected_info["inputs"]["image"] = image.filename
+            
+        if ecg:
+            saved_ecg_path = os.path.join(request_dir, ecg.filename)
+            shutil.copy2(ecg_path, saved_ecg_path)
+            collected_info["inputs"]["ecg"] = ecg.filename
+            
+        # Save JSON data
+        with open(os.path.join(request_dir, "data.json"), "w") as f:
+            json.dump(collected_info, f, indent=4, ensure_ascii=False)
+            
+        return JSONResponse(content={"result": result_text, "request_id": request_id})
         
     except Exception as e:
         import traceback
         traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/feedback")
+async def submit_feedback(data: dict = Body(...)):
+    request_id = data.get("request_id")
+    feedback_type = data.get("feedback")  # "like" or "dislike"
+    
+    if not request_id or not feedback_type:
+        raise HTTPException(status_code=400, detail="Missing request_id or feedback type")
+        
+    request_dir = os.path.join(DATA_COLLECTION_DIR, request_id)
+    json_path = os.path.join(request_dir, "data.json")
+    
+    if not os.path.exists(json_path):
+        raise HTTPException(status_code=404, detail="Request data not found")
+        
+    try:
+        with open(json_path, "r") as f:
+            record = json.load(f)
+            
+        record["feedback"] = feedback_type
+        
+        with open(json_path, "w") as f:
+            json.dump(record, f, indent=4, ensure_ascii=False)
+            
+        return JSONResponse(content={"status": "success", "message": "Feedback recorded"})
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":

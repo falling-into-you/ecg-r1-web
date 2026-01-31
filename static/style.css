@@ -446,6 +446,72 @@ body {
     gap: 0.5rem;
 }
 
+/* Feedback Section */
+.feedback-section {
+    margin-top: 2rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+}
+
+.feedback-section p {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+}
+
+.feedback-buttons {
+    display: flex;
+    gap: 1rem;
+}
+
+.feedback-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: 1px solid var(--border-color);
+    background: white;
+    color: var(--text-muted);
+    font-size: 1.2rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.feedback-btn:hover {
+    background: #f8fafc;
+    color: var(--primary-color);
+    border-color: var(--primary-color);
+}
+
+.feedback-btn.active.like {
+    background: #ecfdf5;
+    color: var(--success-color);
+    border-color: var(--success-color);
+}
+
+.feedback-btn.active.dislike {
+    background: #fef2f2;
+    color: #ef4444;
+    border-color: #ef4444;
+}
+
+.feedback-message {
+    font-size: 0.875rem;
+    color: var(--success-color);
+    font-weight: 500;
+    animation: fadeIn 0.5s ease-out;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(5px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
 .hidden {
     display: none !important;
 }
