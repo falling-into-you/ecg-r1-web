@@ -212,6 +212,17 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function handleImageSelect(file) {
         if (file) {
+            // Validate extension
+            const ext = file.name.split('.').pop().toLowerCase();
+            if (!['png', 'jpg', 'jpeg'].includes(ext)) {
+                alert('Only .png, .jpg, or .jpeg images are allowed.');
+                imageInput.value = '';
+                imageFileName.textContent = '';
+                imagePreview.src = '';
+                imagePreviewContainer.classList.add('hidden');
+                return;
+            }
+
             imageFileName.textContent = file.name;
             const reader = new FileReader();
             reader.onload = function(e) {
@@ -232,11 +243,35 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // --- ECG File Handling ---
     ecgInput.addEventListener('change', function() {
-        if (this.files[0]) {
-            ecgFileName.textContent = this.files[0].name;
+        if (this.files.length > 0) {
+            // Requirement: Must select exactly 2 files (.dat and .hea)
+            if (this.files.length !== 2) {
+                alert('Please select exactly 2 files (.dat and .hea) for the ECG signal.');
+                this.value = ''; // Clear selection
+                ecgFileName.textContent = 'Select .dat and .hea files...';
+                ecgFileName.style.color = '';
+                return;
+            }
+
+            const files = Array.from(this.files);
+            const exts = files.map(f => f.name.split('.').pop().toLowerCase());
+            
+            const hasDat = exts.includes('dat');
+            const hasHea = exts.includes('hea');
+
+            if (!hasDat || !hasHea) {
+                alert('You must select one .dat file and one .hea file.');
+                this.value = ''; // Clear selection
+                ecgFileName.textContent = 'Select .dat and .hea files...';
+                ecgFileName.style.color = '';
+                return;
+            }
+
+            // Success
+            ecgFileName.textContent = files.map(f => f.name).join(', ');
             ecgFileName.style.color = '#0f172a'; // Darker text
         } else {
-            ecgFileName.textContent = 'Select .dat/.hea signal file...';
+            ecgFileName.textContent = 'Select .dat and .hea files...';
             ecgFileName.style.color = ''; // Reset
         }
     });
