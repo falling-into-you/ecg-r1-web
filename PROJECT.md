@@ -61,9 +61,16 @@ Ubuntu 22.04 示例（需要 sudo 权限）：
 - Like / Dislike 反馈：`/feedback` 写入对应 request 的 `data.json`
 
 ### 数据落盘
-- 推理请求会在 `data_collection/{request_id}/` 保存：
-  - `data.json`（包含输入、模型输出、反馈等）
+- 推理请求会在 `data_collection/YYYY-MM-DD/{request_id}/` 保存：
+  - `data.json`（包含输入、模型输出、反馈、用户信息、推理配置等）
   - 上传的 image/ecg 文件（如有）
+- 不再使用单独的 `uploads/` 目录，避免重复与混乱
+
+### 数据字段约定（data.json）
+- `client.ip`：用户 IP（优先读 `X-Forwarded-For`，否则使用直连 IP）
+- `client.geo`：地区信息（从请求头读取：`CF-IPCountry` / `X-Geo-*` 等；未提供则为空）
+- `meta_info.model_display_name`：当前推理模型名称（与页面展示一致）
+- `feedback`：点赞/点踩会更新 `feedback`、`feedback_at`、`feedback_client`
 
 ## 待实现功能（Backlog）
 ### 产品与交互

@@ -15,6 +15,8 @@ import threading
 import datetime
 import uuid
 import time
+import glob
+import ipaddress
 from contextlib import asynccontextmanager
 
 # Force flush stdout
@@ -37,6 +39,61 @@ _cuda_probe_tensor = None
 loading_logs = []
 model_loading_status = "pending" # pending, loading, success, failed
 stream_states = {}
+
+def _safe_filename(name: str) -> str:
+    base = os.path.basename(str(name or "")).strip()
+    base = base.replace("/", "_").replace("\\", "_").replace("\x00", "")
+    return base or "file"
+
+def _client_ip(request: Request) -> str:
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        for part in xff.split(","):
+            ip = part.strip()
+            if not ip:
+                continue
+            try:
+                ipa = ipaddress.ip_address(ip)
+            except Exception:
+                continue
+            if ipa.is_private or ipa.is_loopback or ipa.is_link_local or ipa.is_reserved:
+                continue
+            return ip
+        first = xff.split(",")[0].strip()
+        if first:
+            return first
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+def _client_geo(request: Request) -> dict:
+    country = request.headers.get("cf-ipcountry") or request.headers.get("x-geo-country") or request.headers.get("x-country")
+    region = request.headers.get("x-geo-region") or request.headers.get("x-region")
+    city = request.headers.get("x-geo-city") or request.headers.get("x-city")
+    return {
+        "country": country,
+        "region": region,
+        "city": city,
+        "source": "headers" if any([country, region, city]) else None,
+    }
+
+def _date_str() -> str:
+    return datetime.datetime.now().date().isoformat()
+
+def _make_request_dir(request_id: str, date_str: str) -> str:
+    request_dir = os.path.join(DATA_COLLECTION_DIR, date_str, request_id)
+    os.makedirs(request_dir, exist_ok=True)
+    return request_dir
+
+def _find_request_dir(request_id: str) -> str | None:
+    legacy = os.path.join(DATA_COLLECTION_DIR, request_id)
+    if os.path.isdir(legacy):
+        return legacy
+    matches = glob.glob(os.path.join(DATA_COLLECTION_DIR, "*", request_id))
+    for m in matches:
+        if os.path.isdir(m):
+            return m
+    return None
 
 def add_log(msg):
     timestamp = datetime.datetime.now().strftime("%H:%M:%S")
@@ -149,7 +206,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 # Setup directories
-os.makedirs(config.UPLOAD_DIR, exist_ok=True)
+os.makedirs(DATA_COLLECTION_DIR, exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
@@ -171,7 +228,7 @@ async def get_status():
     return JSONResponse(content={"status": "online", "detail": "System ready"})
 
 @app.post("/predict")
-async def predict(image: Optional[UploadFile] = File(None), ecg: Optional[UploadFile] = File(None)):
+async def predict(request: Request, image: Optional[UploadFile] = File(None), ecg: Optional[UploadFile] = File(None)):
     if engine is None:
         raise HTTPException(status_code=500, detail="Model not loaded")
     
@@ -181,25 +238,34 @@ async def predict(image: Optional[UploadFile] = File(None), ecg: Optional[Upload
     try:
         from swift.llm import InferRequest, RequestConfig
         
+        request_id = str(uuid.uuid4())
+        date_str = _date_str()
+        request_dir = _make_request_dir(request_id, date_str)
+
+        inputs = {}
         images_list = []
         objects_dict = {}
         prompt_tags = ""
         
         # Handle ECG file
         if ecg and ecg.filename:
-            ecg_path = os.path.join(config.UPLOAD_DIR, ecg.filename)
+            ecg_name = _safe_filename(ecg.filename)
+            ecg_path = os.path.join(request_dir, ecg_name)
             with open(ecg_path, "wb") as f:
                 shutil.copyfileobj(ecg.file, f)
             objects_dict['ecg'] = [ecg_path]
             prompt_tags += "<ecg>"
+            inputs["ecg"] = ecg_name
             
         # Handle Image file
         if image and image.filename:
-            image_path = os.path.join(config.UPLOAD_DIR, image.filename)
+            image_name = _safe_filename(image.filename)
+            image_path = os.path.join(request_dir, image_name)
             with open(image_path, "wb") as f:
                 shutil.copyfileobj(image.file, f)
             images_list.append(image_path)
             prompt_tags += "<image>"
+            inputs["image"] = image_name
             
         # Construct prompt
         prompt = f"{prompt_tags}nterpret the provided ECG image, identify key features and abnormalities in each lead, and generate a clinical diagnosis that is supported by the observed evidence."
@@ -216,32 +282,35 @@ async def predict(image: Optional[UploadFile] = File(None), ecg: Optional[Upload
         result_text = resp_list[0].choices[0].message.content
         
         # --- Data Collection ---
-        request_id = str(uuid.uuid4())
-        request_dir = os.path.join(DATA_COLLECTION_DIR, request_id)
-        os.makedirs(request_dir, exist_ok=True)
-        
+        client_ip = _client_ip(request)
+        client_geo = _client_geo(request)
+
         collected_info = {
             "request_id": request_id,
             "timestamp": datetime.datetime.now().isoformat(),
-            "inputs": {},
+            "date": date_str,
+            "inputs": inputs,
+            "client": {
+                "ip": client_ip,
+                "geo": client_geo,
+                "user_agent": request.headers.get("user-agent"),
+            },
             "model_output": result_text,
             "meta_info": {
                 "model_path": config.MODEL_PATH,
-                "ecg_tower_path": config.ECG_TOWER_PATH
+                "model_display_name": config.MODEL_DISPLAY_NAME,
+                "ecg_tower_path": config.ECG_TOWER_PATH,
+                "request_config": {
+                    "temperature": 0.0,
+                    "max_tokens": 2048,
+                    "top_p": 0,
+                    "top_k": 0,
+                    "repetition_penalty": 1.0,
+                    "stream": False,
+                },
             },
             "feedback": None
         }
-
-        # Save input files to collection dir
-        if image and image.filename:
-            saved_image_path = os.path.join(request_dir, image.filename)
-            shutil.copy2(image_path, saved_image_path)
-            collected_info["inputs"]["image"] = image.filename
-            
-        if ecg and ecg.filename:
-            saved_ecg_path = os.path.join(request_dir, ecg.filename)
-            shutil.copy2(ecg_path, saved_ecg_path)
-            collected_info["inputs"]["ecg"] = ecg.filename
             
         # Save JSON data
         with open(os.path.join(request_dir, "data.json"), "w") as f:
@@ -255,7 +324,7 @@ async def predict(image: Optional[UploadFile] = File(None), ecg: Optional[Upload
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/predict_stream")
-async def predict_stream(image: Optional[UploadFile] = File(None), ecg: Optional[UploadFile] = File(None)):
+async def predict_stream(request: Request, image: Optional[UploadFile] = File(None), ecg: Optional[UploadFile] = File(None)):
     if engine is None:
         raise HTTPException(status_code=500, detail="Model not loaded")
     if not image and not ecg:
@@ -263,23 +332,34 @@ async def predict_stream(image: Optional[UploadFile] = File(None), ecg: Optional
 
     from swift.llm import InferRequest, RequestConfig
 
+    request_id = str(uuid.uuid4())
+    date_str = _date_str()
+    request_dir = _make_request_dir(request_id, date_str)
+    client_ip = _client_ip(request)
+    client_geo = _client_geo(request)
+
     images_list = []
     objects_dict = {}
     prompt_tags = ""
+    inputs = {}
 
     if ecg and ecg.filename:
-        ecg_path = os.path.join(config.UPLOAD_DIR, ecg.filename)
+        ecg_name = _safe_filename(ecg.filename)
+        ecg_path = os.path.join(request_dir, ecg_name)
         with open(ecg_path, "wb") as f:
             shutil.copyfileobj(ecg.file, f)
         objects_dict["ecg"] = [ecg_path]
         prompt_tags += "<ecg>"
+        inputs["ecg"] = ecg_name
 
     if image and image.filename:
-        image_path = os.path.join(config.UPLOAD_DIR, image.filename)
+        image_name = _safe_filename(image.filename)
+        image_path = os.path.join(request_dir, image_name)
         with open(image_path, "wb") as f:
             shutil.copyfileobj(image.file, f)
         images_list.append(image_path)
         prompt_tags += "<image>"
+        inputs["image"] = image_name
 
     prompt = f"{prompt_tags}Interpret the provided ECG image, identify key features and abnormalities in each lead, and generate a clinical diagnosis that is supported by the observed evidence."
     infer_request = InferRequest(
@@ -289,11 +369,11 @@ async def predict_stream(image: Optional[UploadFile] = File(None), ecg: Optional
     )
     request_config = RequestConfig(temperature=0.0, max_tokens=2048, top_p=0, top_k=0, repetition_penalty=1.0, stream=True)
 
-    request_id = str(uuid.uuid4())
-    request_dir = os.path.join(DATA_COLLECTION_DIR, request_id)
-    os.makedirs(request_dir, exist_ok=True)
     stream_states[request_id] = {
         "started_at": time.time(),
+        "request_dir": request_dir,
+        "date": date_str,
+        "client_ip": client_ip,
         "content": "",
         "reasoning": "",
         "done": False,
@@ -372,25 +452,30 @@ async def predict_stream(image: Optional[UploadFile] = File(None), ecg: Optional
             collected_info = {
                 "request_id": request_id,
                 "timestamp": datetime.datetime.now().isoformat(),
-                "inputs": {},
+                "date": date_str,
+                "inputs": inputs,
                 "model_output": content_buf,
                 "reasoning_output": reasoning_buf,
+                "client": {
+                    "ip": client_ip,
+                    "geo": client_geo,
+                    "user_agent": request.headers.get("user-agent"),
+                },
                 "meta_info": {
                     "model_path": config.MODEL_PATH,
+                    "model_display_name": config.MODEL_DISPLAY_NAME,
                     "ecg_tower_path": config.ECG_TOWER_PATH,
+                    "request_config": {
+                        "temperature": 0.0,
+                        "max_tokens": 2048,
+                        "top_p": 0,
+                        "top_k": 0,
+                        "repetition_penalty": 1.0,
+                        "stream": True,
+                    },
                 },
                 "feedback": None,
             }
-
-            if image and image.filename:
-                saved_image_path = os.path.join(request_dir, image.filename)
-                shutil.copy2(image_path, saved_image_path)
-                collected_info["inputs"]["image"] = image.filename
-
-            if ecg and ecg.filename:
-                saved_ecg_path = os.path.join(request_dir, ecg.filename)
-                shutil.copy2(ecg_path, saved_ecg_path)
-                collected_info["inputs"]["ecg"] = ecg.filename
 
             with open(os.path.join(request_dir, "data.json"), "w") as f:
                 json.dump(collected_info, f, indent=4, ensure_ascii=False)
@@ -419,14 +504,17 @@ async def predict_progress(request_id: str):
     return state
 
 @app.post("/feedback")
-async def submit_feedback(data: dict = Body(...)):
+async def submit_feedback(request: Request, data: dict = Body(...)):
     request_id = data.get("request_id")
     feedback_type = data.get("feedback")  # "like" or "dislike"
     
     if not request_id or not feedback_type:
         raise HTTPException(status_code=400, detail="Missing request_id or feedback type")
         
-    request_dir = os.path.join(DATA_COLLECTION_DIR, request_id)
+    request_dir = _find_request_dir(request_id)
+    if not request_dir:
+        raise HTTPException(status_code=404, detail="Request data not found")
+
     json_path = os.path.join(request_dir, "data.json")
     
     if not os.path.exists(json_path):
@@ -437,6 +525,12 @@ async def submit_feedback(data: dict = Body(...)):
             record = json.load(f)
             
         record["feedback"] = feedback_type
+        record["feedback_at"] = datetime.datetime.now().isoformat()
+        record["feedback_client"] = {
+            "ip": _client_ip(request),
+            "geo": _client_geo(request),
+            "user_agent": request.headers.get("user-agent"),
+        }
         
         with open(json_path, "w") as f:
             json.dump(record, f, indent=4, ensure_ascii=False)

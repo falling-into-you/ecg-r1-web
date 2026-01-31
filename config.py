@@ -25,5 +25,4 @@ ENV_VARS = {
     "FREEZE_ECG_PROJECTOR": "True",
 }
 
-UPLOAD_DIR = "/data/jinjiarui/run/ecg-r1-web/uploads"
 DATA_COLLECTION_DIR = "/data/jinjiarui/run/ecg-r1-web/data_collection"
