@@ -8,14 +8,14 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/style.css?v=20260131-2">
 </head>
 <body>
     <nav class="navbar">
         <div class="nav-content">
             <div class="logo">
                 <i class="fa-solid fa-heart-pulse"></i>
-                <span>ECG-R1 Platform</span>
+                <span>ECG-R1 Platform <span class="lab">@PKU Digital Health Lab</span></span>
             </div>
             <div class="nav-links">
                 <span class="status-badge"><i class="fa-solid fa-circle-check"></i> System Online</span>
@@ -100,17 +100,11 @@
                         </div>
                         <div class="meta-item">
                             <span class="label">Model:</span>
-                            <span class="value">ECG-R1-8B-v2</span>
+                            <span class="value">{{ model_display_name }}</span>
                         </div>
                     </div>
                     
                     <div class="report-body">
-                        <!-- Diagnosis Section -->
-                        <div class="diagnosis-section">
-                            <div class="section-title"><i class="fa-solid fa-stethoscope"></i> Final Diagnosis</div>
-                            <div id="diagnosisText" class="diagnosis-text"></div>
-                        </div>
-
                         <!-- Reasoning Section (Always Visible) -->
                         <div class="reasoning-section">
                             <div class="section-header">
@@ -119,6 +113,12 @@
                             <div class="panel-content" id="reasoningContent">
                                 <div id="reasoningText" class="reasoning-text"></div>
                             </div>
+                        </div>
+
+                        <!-- Diagnosis Section -->
+                        <div class="diagnosis-section">
+                            <div class="section-title"><i class="fa-solid fa-stethoscope"></i> Final Diagnosis</div>
+                            <div id="diagnosisText" class="diagnosis-text"></div>
                         </div>
                     </div>
 
@@ -146,6 +146,6 @@
         </div>
     </main>
 
-    <script src="/static/script.js"></script>
+    <script src="/static/script.js?v=20260131-14"></script>
 </body>
 </html>

@@ -5,3 +5,4 @@ venv/
 .DS_Store
 uploads/
 collected_data/
+data_collection

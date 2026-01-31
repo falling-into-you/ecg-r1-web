@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>System Initializing - ECG-R1</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        body {
+            background-color: #0f172a;
+            color: #e2e8f0;
+            font-family: 'Inter', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .container {
+            width: 80%;
+            max-width: 800px;
+            background: #1e293b;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+            padding: 2rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+        .header {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            border-bottom: 1px solid #334155;
+            padding-bottom: 1rem;
+        }
+        .spinner {
+            width: 24px;
+            height: 24px;
+            border: 3px solid #3b82f6;
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        h1 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin: 0;
+            color: #f8fafc;
+        }
+        .terminal {
+            background: #000;
+            border-radius: 4px;
+            padding: 1rem;
+            font-family: monospace;
+            font-size: 0.875rem;
+            height: 300px;
+            overflow-y: auto;
+            color: #22c55e;
+            white-space: pre-wrap;
+            line-height: 1.5;
+        }
+        .status-text {
+            color: #94a3b8;
+            font-size: 0.875rem;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="spinner"></div>
+            <h1>System Initializing...</h1>
+        </div>
+        <div class="terminal" id="terminal"></div>
+        <p class="status-text" id="statusText">Loading model weights into GPU memory...</p>
+    </div>
+
+    <script>
+        const terminal = document.getElementById('terminal');
+        const statusText = document.getElementById('statusText');
+        
+        function appendLog(message) {
+            const line = document.createElement('div');
+            line.textContent = message;
+            terminal.appendChild(line);
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+
+        async function checkStatus() {
+            try {
+                const response = await fetch('/startup-logs');
+                const data = await response.json();
+                
+                terminal.innerHTML = ''; // Clear to avoid duplicates or manage better
+                data.logs.forEach(log => appendLog(log));
+
+                if (data.status === 'success') {
+                    statusText.textContent = "Initialization complete! Redirecting...";
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1000);
+                    return;
+                } else if (data.status === 'failed') {
+                    statusText.textContent = "Initialization failed. Please check logs.";
+                    statusText.style.color = "#ef4444";
+                    document.querySelector('.spinner').style.border = "3px solid #ef4444";
+                    return; // Stop polling
+                }
+
+                setTimeout(checkStatus, 1000);
+            } catch (e) {
+                console.error(e);
+                setTimeout(checkStatus, 2000);
+            }
+        }
+
+        checkStatus();
+    </script>
+</body>
+</html>

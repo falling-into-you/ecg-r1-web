@@ -1,59 +1,148 @@
 import sys
 import os
-import shutil
-import importlib.util
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
-from fastapi.requests import Request
 import config
-
-# Setup paths and env vars
+from config import DATA_COLLECTION_DIR
 sys.path.insert(0, config.ECG_R1_ROOT)
 for k, v in config.ENV_VARS.items():
     os.environ[k] = v
+
+import shutil
+import importlib.util
+import asyncio
+import queue
+import torch
+import threading
+import datetime
+import uuid
+import time
+from contextlib import asynccontextmanager
+
+# Force flush stdout
+sys.stdout.reconfigure(line_buffering=True)
+from typing import Optional
+from fastapi import FastAPI, UploadFile, File, HTTPException, Body
+from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from fastapi.requests import Request
+import json
 
 # Global engine variable
 engine = None
 processor = None
 template = None
+_cuda_probe_tensor = None
+
+# Loading state
+loading_logs = []
+model_loading_status = "pending" # pending, loading, success, failed
+stream_states = {}
+
+def add_log(msg):
+    timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+    log_entry = f"[{timestamp}] {msg}"
+    loading_logs.append(log_entry)
+    print(log_entry)
 
 def load_custom_register():
-    # Load my_register_v3.py as done in test_inference.py
-    register_path = os.path.join(config.ECG_R1_ROOT, "ecg_r1/my_register_v3.py")
+    # Load LOCAL my_register_v3.py
+    register_path = os.path.join(os.getcwd(), "my_register_v3.py")
     if not os.path.exists(register_path):
-        print(f"Warning: Register file not found at {register_path}")
+        add_log(f"Warning: Register file not found at {register_path}")
         return
         
     spec = importlib.util.spec_from_file_location("my_register", register_path)
     my_register = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(my_register)
-    print("Custom register loaded.")
+    add_log("Custom register loaded (local version).")
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    global engine, processor, template
-    print("Loading model...")
+def load_model_background():
+    global engine, processor, template, model_loading_status
+    model_loading_status = "loading"
+    add_log("Initializing system...")
+    
     try:
+        # Setup env vars
+        for k, v in config.ENV_VARS.items():
+            os.environ[k] = v
+        
+        add_log(f"DEBUG: ECG_TOWER_PATH={os.environ.get('ECG_TOWER_PATH')}")
+        add_log(f"DEBUG: ROOT_ECG_DIR={os.environ.get('ROOT_ECG_DIR')}")
+        add_log(f"Environment variables set. CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES')}")
+        add_log(f"PID={os.getpid()}")
+        add_log(f"torch.version.cuda={getattr(torch.version, 'cuda', None)}")
+        add_log(f"torch.cuda.is_available={torch.cuda.is_available()}")
+        add_log(f"torch.cuda.device_count={torch.cuda.device_count()}")
+        if torch.cuda.is_available():
+            try:
+                current_idx = torch.cuda.current_device()
+                add_log(f"torch.cuda.current_device={current_idx}")
+                add_log(f"torch.cuda.get_device_name={torch.cuda.get_device_name(current_idx)}")
+            except Exception as e:
+                add_log(f"CUDA device query failed: {e}")
+            global _cuda_probe_tensor
+            try:
+                _cuda_probe_tensor = torch.empty(1, device="cuda")
+                add_log("CUDA probe allocation ok")
+            except Exception as e:
+                add_log(f"CUDA probe allocation failed: {e}")
+
+        add_log("Importing swift modules...")
         # Import swift modules here to ensure env vars are set
         from swift.llm import PtEngine, get_model_tokenizer, get_template
+        add_log("Swift modules imported.")
         
         load_custom_register()
         
         # Check if model path exists
         if not os.path.exists(config.MODEL_PATH):
-            print(f"Error: Model path {config.MODEL_PATH} does not exist.")
-            # We don't raise error here to allow server to start, but inference will fail
-        else:
-            model, processor = get_model_tokenizer(config.MODEL_PATH, model_type='ecg_r1', attn_impl='flash_attention_2')
-            template = get_template('ecg_r1', processor)
-            engine = PtEngine.from_model_template(model, template, max_batch_size=1)
-            print("Model loaded successfully.")
+            add_log(f"Error: Model path {config.MODEL_PATH} does not exist.")
+            model_loading_status = "failed"
+            return
+        
+        add_log(f"Loading model from {config.MODEL_PATH} with bfloat16...")
+        model, processor = get_model_tokenizer(
+            config.MODEL_PATH, 
+            model_type='ecg_r1', 
+            torch_dtype=torch.bfloat16
+        )
+        add_log("Model and tokenizer loaded into memory.")
+        try:
+            hf_device_map = getattr(model, "hf_device_map", None)
+            if hf_device_map is not None:
+                add_log(f"hf_device_map={hf_device_map}")
+            first_param = next(model.parameters(), None)
+            if first_param is not None:
+                add_log(f"first_param_device={first_param.device}")
+        except Exception as e:
+            add_log(f"Model device inspection failed: {e}")
+        
+        template = get_template('ecg_r1', processor)
+        engine = PtEngine.from_model_template(model, template, max_batch_size=1)
+        add_log("Inference engine initialized. System Ready.")
+        if torch.cuda.is_available():
+            try:
+                allocated = torch.cuda.memory_allocated() / (1024 ** 2)
+                reserved = torch.cuda.memory_reserved() / (1024 ** 2)
+                add_log(f"cuda.memory_allocated_mib={allocated:.1f}")
+                add_log(f"cuda.memory_reserved_mib={reserved:.1f}")
+            except Exception as e:
+                add_log(f"CUDA memory stats failed: {e}")
+        
+        model_loading_status = "success"
+        
     except Exception as e:
-        print(f"Failed to load model: {e}")
-    
+        import traceback
+        err = traceback.format_exc()
+        add_log(f"Critical Error: {str(e)}")
+        add_log(err)
+        model_loading_status = "failed"
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Start loading in background thread
+    thread = threading.Thread(target=load_model_background)
+    thread.start()
     yield
     print("Shutting down...")
 
@@ -66,7 +155,14 @@ templates = Jinja2Templates(directory="templates")
 
 @app.get("/")
 async def read_root(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    if model_loading_status == "success":
+        return templates.TemplateResponse("index.html", {"request": request, "model_display_name": config.MODEL_DISPLAY_NAME})
+    else:
+        return templates.TemplateResponse("loading.html", {"request": request})
+
+@app.get("/startup-logs")
+async def get_startup_logs():
+    return {"status": model_loading_status, "logs": loading_logs}
 
 @app.get("/status")
 async def get_status():
@@ -90,7 +186,7 @@ async def predict(image: Optional[UploadFile] = File(None), ecg: Optional[Upload
         prompt_tags = ""
         
         # Handle ECG file
-        if ecg:
+        if ecg and ecg.filename:
             ecg_path = os.path.join(config.UPLOAD_DIR, ecg.filename)
             with open(ecg_path, "wb") as f:
                 shutil.copyfileobj(ecg.file, f)
@@ -98,7 +194,7 @@ async def predict(image: Optional[UploadFile] = File(None), ecg: Optional[Upload
             prompt_tags += "<ecg>"
             
         # Handle Image file
-        if image:
+        if image and image.filename:
             image_path = os.path.join(config.UPLOAD_DIR, image.filename)
             with open(image_path, "wb") as f:
                 shutil.copyfileobj(image.file, f)
@@ -106,7 +202,7 @@ async def predict(image: Optional[UploadFile] = File(None), ecg: Optional[Upload
             prompt_tags += "<image>"
             
         # Construct prompt
-        prompt = f"{prompt_tags}\nInterpret the provided data, identify key features and abnormalities, and generate a clinical diagnosis that is supported by the observed evidence."
+        prompt = f"{prompt_tags}nterpret the provided ECG image, identify key features and abnormalities in each lead, and generate a clinical diagnosis that is supported by the observed evidence."
         
         infer_request = InferRequest(
             messages=[{'role': 'user', 'content': prompt}],
@@ -137,12 +233,12 @@ async def predict(image: Optional[UploadFile] = File(None), ecg: Optional[Upload
         }
 
         # Save input files to collection dir
-        if image:
+        if image and image.filename:
             saved_image_path = os.path.join(request_dir, image.filename)
             shutil.copy2(image_path, saved_image_path)
             collected_info["inputs"]["image"] = image.filename
             
-        if ecg:
+        if ecg and ecg.filename:
             saved_ecg_path = os.path.join(request_dir, ecg.filename)
             shutil.copy2(ecg_path, saved_ecg_path)
             collected_info["inputs"]["ecg"] = ecg.filename
@@ -157,6 +253,170 @@ async def predict(image: Optional[UploadFile] = File(None), ecg: Optional[Upload
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/predict_stream")
+async def predict_stream(image: Optional[UploadFile] = File(None), ecg: Optional[UploadFile] = File(None)):
+    if engine is None:
+        raise HTTPException(status_code=500, detail="Model not loaded")
+    if not image and not ecg:
+        raise HTTPException(status_code=400, detail="Please provide at least one input (Image or ECG signal).")
+
+    from swift.llm import InferRequest, RequestConfig
+
+    images_list = []
+    objects_dict = {}
+    prompt_tags = ""
+
+    if ecg and ecg.filename:
+        ecg_path = os.path.join(config.UPLOAD_DIR, ecg.filename)
+        with open(ecg_path, "wb") as f:
+            shutil.copyfileobj(ecg.file, f)
+        objects_dict["ecg"] = [ecg_path]
+        prompt_tags += "<ecg>"
+
+    if image and image.filename:
+        image_path = os.path.join(config.UPLOAD_DIR, image.filename)
+        with open(image_path, "wb") as f:
+            shutil.copyfileobj(image.file, f)
+        images_list.append(image_path)
+        prompt_tags += "<image>"
+
+    prompt = f"{prompt_tags}Interpret the provided ECG image, identify key features and abnormalities in each lead, and generate a clinical diagnosis that is supported by the observed evidence."
+    infer_request = InferRequest(
+        messages=[{"role": "user", "content": prompt}],
+        images=images_list,
+        objects=objects_dict,
+    )
+    request_config = RequestConfig(temperature=0.0, max_tokens=2048, top_p=0, top_k=0, repetition_penalty=1.0, stream=True)
+
+    request_id = str(uuid.uuid4())
+    request_dir = os.path.join(DATA_COLLECTION_DIR, request_id)
+    os.makedirs(request_dir, exist_ok=True)
+    stream_states[request_id] = {
+        "started_at": time.time(),
+        "content": "",
+        "reasoning": "",
+        "done": False,
+        "error": None,
+    }
+
+    async def event_gen():
+        content_buf = ""
+        reasoning_buf = ""
+        q: "queue.Queue[tuple[str, str]]" = queue.Queue()
+        started_at = time.time()
+        max_wait_s = 600
+
+        def _run_infer():
+            try:
+                resp_list = engine.infer([infer_request], request_config)
+                item = resp_list[0] if resp_list else None
+
+                if item is not None and hasattr(item, "__iter__") and not hasattr(item, "choices"):
+                    for chunk in item:
+                        for choice in getattr(chunk, "choices", []) or []:
+                            delta = getattr(choice, "delta", None)
+                            if delta is None:
+                                continue
+                            rc = getattr(delta, "reasoning_content", None)
+                            if rc:
+                                stream_states[request_id]["reasoning"] += rc
+                                q.put(("reasoning", rc))
+                            c = getattr(delta, "content", None)
+                            if c:
+                                stream_states[request_id]["content"] += c
+                                q.put(("content", c))
+                else:
+                    result_text = getattr(getattr(getattr(item, "choices", [None])[0], "message", None), "content", "") if item is not None else ""
+                    if result_text:
+                        chunk_size = 64
+                        for i in range(0, len(result_text), chunk_size):
+                            chunk = result_text[i:i + chunk_size]
+                            stream_states[request_id]["content"] += chunk
+                            q.put(("content", chunk))
+
+                stream_states[request_id]["done"] = True
+                q.put(("done", request_id))
+            except Exception as e:
+                stream_states[request_id]["error"] = str(e)
+                q.put(("error", str(e)))
+
+        thread = threading.Thread(target=_run_infer, daemon=True)
+        thread.start()
+
+        try:
+            yield f"event: ready\ndata: {json.dumps({'request_id': request_id}, ensure_ascii=False)}\n\n"
+            while True:
+                if time.time() - started_at > max_wait_s:
+                    yield f"event: error\ndata: {json.dumps({'detail': f'timeout after {max_wait_s}s'}, ensure_ascii=False)}\n\n"
+                    return
+
+                try:
+                    event_type, payload = await asyncio.to_thread(q.get, True, 1.0)
+                except Exception:
+                    yield f"event: ping\ndata: {json.dumps({'t': time.time()}, ensure_ascii=False)}\n\n"
+                    continue
+
+                if event_type == "reasoning":
+                    reasoning_buf += payload
+                    yield f"event: reasoning\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                elif event_type == "content":
+                    content_buf += payload
+                    yield f"event: content\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                elif event_type == "done":
+                    break
+                elif event_type == "error":
+                    yield f"event: error\ndata: {json.dumps({'detail': payload}, ensure_ascii=False)}\n\n"
+                    return
+
+            collected_info = {
+                "request_id": request_id,
+                "timestamp": datetime.datetime.now().isoformat(),
+                "inputs": {},
+                "model_output": content_buf,
+                "reasoning_output": reasoning_buf,
+                "meta_info": {
+                    "model_path": config.MODEL_PATH,
+                    "ecg_tower_path": config.ECG_TOWER_PATH,
+                },
+                "feedback": None,
+            }
+
+            if image and image.filename:
+                saved_image_path = os.path.join(request_dir, image.filename)
+                shutil.copy2(image_path, saved_image_path)
+                collected_info["inputs"]["image"] = image.filename
+
+            if ecg and ecg.filename:
+                saved_ecg_path = os.path.join(request_dir, ecg.filename)
+                shutil.copy2(ecg_path, saved_ecg_path)
+                collected_info["inputs"]["ecg"] = ecg.filename
+
+            with open(os.path.join(request_dir, "data.json"), "w") as f:
+                json.dump(collected_info, f, indent=4, ensure_ascii=False)
+
+            yield f"event: done\ndata: {json.dumps({'request_id': request_id}, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            stream_states[request_id]["error"] = str(e)
+            yield f"event: error\ndata: {json.dumps({'detail': str(e)}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+            "X-Request-ID": request_id,
+        },
+    )
+
+@app.get("/predict_progress/{request_id}")
+async def predict_progress(request_id: str):
+    state = stream_states.get(request_id)
+    if not state:
+        raise HTTPException(status_code=404, detail="Request not found")
+    return state
 
 @app.post("/feedback")
 async def submit_feedback(data: dict = Body(...)):
