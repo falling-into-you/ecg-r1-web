@@ -135,25 +135,28 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     likeBtn.addEventListener('click', () => {
-        if (!isAnalysisComplete) {
-            alert('Please wait until the analysis completes before submitting feedback.');
-            return;
+        if (!currentRequestId) {
+            // Try to recover from DOM if missing (e.g. after refresh if we persisted state, though here we don't)
+            const val = requestIdValue.textContent.trim();
+            if (val && val !== '--') currentRequestId = val;
         }
-        if (!currentRequestId && requestIdValue && requestIdValue.textContent) {
-            const value = String(requestIdValue.textContent || '').trim();
-            if (value && value !== '--') currentRequestId = value;
+
+        if (!currentRequestId) {
+            alert('Waiting for analysis to start...');
+            return;
         }
         openFeedbackDetail('like');
     });
 
     dislikeBtn.addEventListener('click', () => {
-        if (!isAnalysisComplete) {
-            alert('Please wait until the analysis completes before submitting feedback.');
-            return;
+        if (!currentRequestId) {
+             const val = requestIdValue.textContent.trim();
+             if (val && val !== '--') currentRequestId = val;
         }
-        if (!currentRequestId && requestIdValue && requestIdValue.textContent) {
-            const value = String(requestIdValue.textContent || '').trim();
-            if (value && value !== '--') currentRequestId = value;
+
+        if (!currentRequestId) {
+            alert('Waiting for analysis to start...');
+            return;
         }
         openFeedbackDetail('dislike');
     });
@@ -378,10 +381,10 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             const requestIdHeader = response.headers.get('x-request-id');
             let revealed = true;
-            currentRequestId = null;
+            currentRequestId = requestIdHeader; // Set immediately
             submitBtn.innerHTML = '<span>Generating...</span>';
             const startedAt = Date.now();
-            if (requestIdValue) requestIdValue.textContent = requestIdHeader || '--';
+            if (requestIdValue) requestIdValue.textContent = currentRequestId || '--';
 
             reportDate.textContent = new Date().toLocaleDateString('en-US', {
                 year: 'numeric', month: 'long', day: 'numeric',
