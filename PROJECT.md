@@ -80,12 +80,16 @@ Ubuntu 22.04 示例（需要 sudo 权限）：
   - **ECG Image**：限制仅接受 `.png`, `.jpg`, `.jpeg`。
 - 流式推理：前端优先使用 SSE（`/predict_stream`）
 - 兼容 IDE WebView/代理缓冲：SSE 无增量时自动切换轮询 `/predict_progress/{request_id}`
-- 推理结果分区：按 `<think>...</think>` 将内容分到 Reasoning 与 Diagnosis（并显示 `<think>` 标签）
+- 推理结果分区：
+  - **Reasoning Process**：`<think>...</think>` 内容。
+  - **Interpretation Summary**：主要诊断文本。
+  - **Final Answer**：`<answer>...</answer>` 内容（如有），展示在单独的 Answer 区域。
 
 ### 结果展示与交互
 - Report meta：Date / Model / Request ID
 - Request ID 复制按钮
 - Reasoning 可折叠/展开
+- 结果展示分区：Interpretation Summary (原 Final Diagnosis) + Final Answer (新)
 - 流式输出动效：打字机逐步追加 + 光标闪烁（完成后停止）
 - Like / Dislike 反馈：`/feedback` 写入对应 request 的 `data.json`
 

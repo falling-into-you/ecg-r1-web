@@ -16,6 +16,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const loadingState = document.getElementById('loadingState');
     const resultContent = document.getElementById('resultContent');
     const diagnosisText = document.getElementById('diagnosisText');
+    const answerText = document.getElementById('answerText');
+    const answerSection = document.getElementById('answerSection');
     const reasoningText = document.getElementById('reasoningText');
     const reportDate = document.getElementById('reportDate');
     const requestIdValue = document.getElementById('requestIdValue');
@@ -141,48 +143,58 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // --- Helper Function to Parse Result ---
     function parseResult(text) {
-        if (!text) return { thinking: "", diagnosis: "" };
+        if (!text) return { thinking: "", diagnosis: "", answer: "" };
 
         const raw = String(text);
-        const thinkMatch = raw.match(/<think>([\s\S]*?)<\/think>/i);
+        
+        // Extract Answer first <answer>...</answer>
+        let answer = "";
+        let content = raw;
+        const answerMatch = raw.match(/<answer>([\s\S]*?)<\/answer>/i);
+        if (answerMatch) {
+            answer = (answerMatch[1] || "").trim();
+            content = raw.replace(/<answer>[\s\S]*?<\/answer>/i, "").trim();
+        }
+
+        const thinkMatch = content.match(/<think>([\s\S]*?)<\/think>/i);
         if (thinkMatch) {
             const thinking = (thinkMatch[1] || "").trim();
-            const diagnosis = raw.replace(/<think>[\s\S]*?<\/think>/i, "").trim();
-            return { thinking, diagnosis };
+            const diagnosis = content.replace(/<think>[\s\S]*?<\/think>/i, "").trim();
+            return { thinking, diagnosis, answer };
         }
 
         const markerReasoning = /(?:^|\n)\s*(?:thinking|reasoning|analysis|思考过程|思考|推理过程|推理|分析)\s*[:：]\s*/i;
         const markerFinal = /(?:^|\n)\s*(?:final|final answer|answer|diagnosis|结论|最终诊断|最终结论|诊断)\s*[:：]\s*/i;
 
-        const reasoningMatch = raw.match(markerReasoning);
-        const finalMatch = raw.match(markerFinal);
+        const reasoningMatch = content.match(markerReasoning);
+        const finalMatch = content.match(markerFinal);
         if (finalMatch) {
             const finalIdx = finalMatch.index ?? -1;
             const finalLabelLen = finalMatch[0].length;
-            const before = finalIdx >= 0 ? raw.slice(0, finalIdx).trim() : "";
-            const after = finalIdx >= 0 ? raw.slice(finalIdx + finalLabelLen).trim() : raw.trim();
+            const before = finalIdx >= 0 ? content.slice(0, finalIdx).trim() : "";
+            const after = finalIdx >= 0 ? content.slice(finalIdx + finalLabelLen).trim() : content.trim();
 
             let thinking = before;
             if (reasoningMatch) {
                 const rIdx = reasoningMatch.index ?? -1;
                 const rLen = reasoningMatch[0].length;
                 if (rIdx >= 0 && rIdx + rLen <= finalIdx) {
-                    thinking = raw.slice(rIdx + rLen, finalIdx).trim();
+                    thinking = content.slice(rIdx + rLen, finalIdx).trim();
                 }
             }
-            return { thinking, diagnosis: after };
+            return { thinking, diagnosis: after, answer };
         }
 
         if (reasoningMatch) {
             const rIdx = reasoningMatch.index ?? -1;
             const rLen = reasoningMatch[0].length;
             if (rIdx >= 0) {
-                const thinking = raw.slice(rIdx + rLen).trim();
-                return { thinking, diagnosis: "" };
+                const thinking = content.slice(rIdx + rLen).trim();
+                return { thinking, diagnosis: "", answer };
             }
         }
 
-        return { thinking: "", diagnosis: raw.trim() };
+        return { thinking: "", diagnosis: content.trim(), answer };
     }
 
     // --- Image Upload Handling ---
@@ -338,6 +350,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 const parsed = parseResult(data.result);
                 diagnosisText.textContent = parsed.diagnosis;
                 reasoningText.textContent = parsed.thinking || "No detailed reasoning process provided by the model.";
+                
+                if (parsed.answer) {
+                    answerText.textContent = parsed.answer;
+                    answerSection.classList.remove('hidden');
+                } else {
+                    answerSection.classList.add('hidden');
+                }
+
                 currentRequestId = data.request_id;
                 if (requestIdValue) requestIdValue.textContent = currentRequestId || '--';
                 return;
@@ -352,19 +372,23 @@ document.addEventListener('DOMContentLoaded', function() {
             reasoningText.textContent = 'Generating...';
             reasoningText.classList.add('streaming');
             diagnosisText.classList.remove('streaming');
+            answerText.classList.remove('streaming');
+            answerSection.classList.add('hidden'); // Hide initially, show if answer detected
 
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
             let buffer = '';
             let contentBuf = '';
             let reasoningBuf = '';
+            let answerBuf = '';
             let rawProcessedLen = 0;
-            const streamState = { inThink: false, carry: '' };
+            const streamState = { inThink: false, inAnswer: false, carry: '' };
             let placeholderShown = true;
             let gotAnyChunk = false;
             let usePolling = false;
             let pendingDiagnosis = '';
             let pendingReasoning = '';
+            let pendingAnswer = '';
             let flushRaf = null;
             let streamDone = false;
             let diagnosisStarted = false;
@@ -373,18 +397,25 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (target === 'reasoning') {
                     reasoningText.classList.add('streaming');
                     diagnosisText.classList.remove('streaming');
+                    answerText.classList.remove('streaming');
                 } else if (target === 'diagnosis') {
                     reasoningText.classList.remove('streaming');
                     diagnosisText.classList.add('streaming');
+                    answerText.classList.remove('streaming');
+                } else if (target === 'answer') {
+                    reasoningText.classList.remove('streaming');
+                    diagnosisText.classList.remove('streaming');
+                    answerText.classList.add('streaming');
                 } else {
                     reasoningText.classList.remove('streaming');
                     diagnosisText.classList.remove('streaming');
+                    answerText.classList.remove('streaming');
                 }
             }
 
             function maybeFinishTyping() {
                 if (!streamDone) return;
-                if (pendingReasoning || pendingDiagnosis) return;
+                if (pendingReasoning || pendingDiagnosis || pendingAnswer) return;
                 if (flushRaf) return;
                 setCursorTarget('none');
             }
@@ -400,7 +431,17 @@ document.addEventListener('DOMContentLoaded', function() {
                     reasoningBuf += take;
                     reasoningText.textContent = reasoningBuf;
                     didWork = true;
-                } else if (!streamState.inThink && pendingDiagnosis) {
+                } else if (pendingAnswer) {
+                    setCursorTarget('answer');
+                    if (answerSection.classList.contains('hidden')) {
+                         answerSection.classList.remove('hidden');
+                    }
+                    const take = pendingAnswer.slice(0, step);
+                    pendingAnswer = pendingAnswer.slice(step);
+                    answerBuf += take;
+                    answerText.textContent = answerBuf;
+                    didWork = true;
+                } else if (!streamState.inThink && !streamState.inAnswer && pendingDiagnosis) {
                     setCursorTarget('diagnosis');
                     const take = pendingDiagnosis.slice(0, step);
                     pendingDiagnosis = pendingDiagnosis.slice(step);
@@ -410,11 +451,13 @@ document.addEventListener('DOMContentLoaded', function() {
                     didWork = true;
                 } else if (streamState.inThink) {
                     setCursorTarget('reasoning');
+                } else if (streamState.inAnswer) {
+                    setCursorTarget('answer');
                 } else if (diagnosisStarted) {
                     setCursorTarget('diagnosis');
                 }
 
-                if (pendingReasoning || pendingDiagnosis) {
+                if (pendingReasoning || pendingDiagnosis || pendingAnswer) {
                     flushRaf = requestAnimationFrame(flushStep);
                     return;
                 }
@@ -444,7 +487,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
 
             function takeCarryPrefix(text) {
-                const candidates = ['<think>', '</think>'];
+                const candidates = ['<think>', '</think>', '<answer>', '</answer>'];
                 const lower = text.toLowerCase();
                 let bestLen = 0;
                 for (const cand of candidates) {
@@ -470,40 +513,78 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 while (text.length > 0) {
                     const lower = text.toLowerCase();
-                    const openIdx = lower.indexOf('<think>');
-                    const closeIdx = lower.indexOf('</think>');
+                    const thinkOpen = lower.indexOf('<think>');
+                    const thinkClose = lower.indexOf('</think>');
+                    const ansOpen = lower.indexOf('<answer>');
+                    const ansClose = lower.indexOf('</answer>');
 
-                    if (!streamState.inThink) {
-                        if (openIdx === -1) {
-                            pendingDiagnosis += text;
-                            scheduleFlush();
-                            return;
-                        }
-                        const before = text.slice(0, openIdx);
-                        if (before) {
-                            pendingDiagnosis += before;
-                            scheduleFlush();
-                        }
-                        pendingReasoning += '<think>';
-                        scheduleFlush();
-                        text = text.slice(openIdx + '<think>'.length);
-                        streamState.inThink = true;
-                    } else {
-                        if (closeIdx === -1) {
-                            pendingReasoning += text;
-                            scheduleFlush();
-                            return;
-                        }
-                        const before = text.slice(0, closeIdx);
-                        if (before) {
-                            pendingReasoning += before;
-                            scheduleFlush();
-                        }
-                        pendingReasoning += '</think>';
-                        scheduleFlush();
-                        text = text.slice(closeIdx + '</think>'.length);
-                        streamState.inThink = false;
+                    // Find the earliest significant tag
+                    let tag = null;
+                    let tagIdx = -1;
+                    
+                    // Helper to check tags
+                    const check = (t, idx) => {
+                         if (idx !== -1 && (tagIdx === -1 || idx < tagIdx)) {
+                             tag = t;
+                             tagIdx = idx;
+                         }
+                    };
+
+                    if (!streamState.inThink && !streamState.inAnswer) {
+                        check('<think>', thinkOpen);
+                        check('<answer>', ansOpen);
+                    } else if (streamState.inThink) {
+                        check('</think>', thinkClose);
+                    } else if (streamState.inAnswer) {
+                        check('</answer>', ansClose);
                     }
+
+                    if (tag === null) {
+                        // No tag found, append all to current state target
+                        if (streamState.inThink) {
+                            pendingReasoning += text;
+                        } else if (streamState.inAnswer) {
+                            pendingAnswer += text;
+                        } else {
+                            pendingDiagnosis += text;
+                        }
+                        scheduleFlush();
+                        return;
+                    }
+
+                    // Process up to tag
+                    const before = text.slice(0, tagIdx);
+                    if (before) {
+                        if (streamState.inThink) {
+                            pendingReasoning += before;
+                        } else if (streamState.inAnswer) {
+                            pendingAnswer += before;
+                        } else {
+                            pendingDiagnosis += before;
+                        }
+                        scheduleFlush();
+                    }
+
+                    // Switch state
+                    if (tag === '<think>') {
+                        streamState.inThink = true;
+                        pendingReasoning += '<think>'; // Keep tag visible in reasoning? Usually yes or we hide it.
+                                                       // Per requirement, we show <think> tags in reasoning area? 
+                                                       // Current impl was appending raw text. 
+                                                       // Let's keep consistency.
+                    } else if (tag === '</think>') {
+                        streamState.inThink = false;
+                        pendingReasoning += '</think>';
+                    } else if (tag === '<answer>') {
+                        streamState.inAnswer = true;
+                        // Don't show <answer> tag in UI, just switch buffer
+                    } else if (tag === '</answer>') {
+                        streamState.inAnswer = false;
+                        // Don't show </answer> tag in UI
+                    }
+
+                    scheduleFlush();
+                    text = text.slice(tagIdx + tag.length);
                 }
             }
 
