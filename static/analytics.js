@@ -15,26 +15,7 @@ function escapeHtml(value) {
 function renderTable(container, headers, rows) {
   const thead = `<thead><tr>${headers.map(h => `<th>${escapeHtml(h)}</th>`).join("")}</tr></thead>`;
   const tbody = `<tbody>${rows.map(r => `<tr>${r.map(c => `<td>${escapeHtml(c)}</td>`).join("")}</tr>`).join("")}</tbody>`;
-  container.innerHTML = `<div style="overflow:auto;"><table style="width:100%; border-collapse:collapse;">${thead}${tbody}</table></div>`;
-  const table = container.querySelector("table");
-  const ths = table.querySelectorAll("th");
-  ths.forEach(th => {
-    th.style.textAlign = "left";
-    th.style.fontSize = "0.85rem";
-    th.style.padding = "0.5rem 0.5rem";
-    th.style.borderBottom = "1px solid #e2e8f0";
-    th.style.color = "#475569";
-    th.style.fontWeight = "700";
-    th.style.whiteSpace = "nowrap";
-  });
-  const tds = table.querySelectorAll("td");
-  tds.forEach(td => {
-    td.style.fontSize = "0.9rem";
-    td.style.padding = "0.45rem 0.5rem";
-    td.style.borderBottom = "1px solid #f1f5f9";
-    td.style.color = "#0f172a";
-    td.style.whiteSpace = "nowrap";
-  });
+  container.innerHTML = `<div class="analytics-table-wrap"><table class="analytics-table">${thead}${tbody}</table></div>`;
 }
 
 const COUNTRY_CENTROIDS = {
@@ -165,4 +146,3 @@ document.addEventListener("DOMContentLoaded", () => {
   el("refreshBtn").addEventListener("click", refresh);
   refresh();
 });
-

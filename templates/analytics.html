@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="/static/icons/css/all.min.css">
     <link rel="stylesheet" href="/static/style.css?v=20260201-1">
     <link rel="stylesheet" href="/static/responsive.css">
+    <link rel="stylesheet" href="/static/analytics.css?v=20260201-1">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
 </head>
 <body>
@@ -31,7 +32,7 @@
                     <p>Internal only. Data source: DATA_COLLECTION_DIR</p>
                 </div>
 
-                <div class="report-meta" id="summaryCards">
+                <div class="analytics-cards" id="summaryCards">
                     <div class="meta-item">
                         <span class="label">Total Requests:</span>
                         <span class="value" id="totalRequests">--</span>
@@ -46,14 +47,18 @@
                     </div>
                 </div>
 
-                <div class="diagnosis-section" style="margin-top: 1.25rem;">
+                <div class="analytics-section">
                     <div class="section-title"><i class="fa-solid fa-flag"></i> Country Breakdown</div>
-                    <div class="diagnosis-text" id="countryTable" style="background:#fff; border-left-color: var(--border-color);"></div>
+                    <div class="analytics-box">
+                        <div class="analytics-box-inner" id="countryTable"></div>
+                    </div>
                 </div>
 
-                <div class="diagnosis-section">
+                <div class="analytics-section">
                     <div class="section-title"><i class="fa-solid fa-network-wired"></i> Top IPs</div>
-                    <div class="diagnosis-text" id="ipTable" style="background:#fff; border-left-color: var(--border-color);"></div>
+                    <div class="analytics-box">
+                        <div class="analytics-box-inner" id="ipTable"></div>
+                    </div>
                 </div>
             </section>
 
@@ -66,7 +71,7 @@
                 </div>
 
                 <div class="result-content" style="display:block;">
-                    <div id="map" style="height: 520px; border-radius: var(--radius-md); border: 1px solid var(--border-color);"></div>
+                    <div id="map" class="analytics-map"></div>
                     <div class="disclaimer" style="margin-top: 1rem;">
                         <i class="fa-solid fa-circle-info"></i>
                         Country markers are derived from request geo headers (if present). Unknown locations are not plotted.
@@ -75,7 +80,9 @@
 
                 <div class="result-content" style="display:block; margin-top: 1rem;">
                     <div class="section-title"><i class="fa-solid fa-clock-rotate-left"></i> Recent Requests</div>
-                    <div class="diagnosis-text" id="recentTable" style="background:#fff; border-left-color: var(--border-color);"></div>
+                    <div class="analytics-box">
+                        <div class="analytics-box-inner" id="recentTable"></div>
+                    </div>
                 </div>
             </section>
         </div>
@@ -85,4 +92,3 @@
     <script src="/static/analytics.js?v=20260201-1"></script>
 </body>
 </html>
-
