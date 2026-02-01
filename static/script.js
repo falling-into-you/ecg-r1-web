@@ -409,11 +409,11 @@ document.addEventListener('DOMContentLoaded', function() {
                     throw new Error(data.detail || 'Analysis failed');
                 }
                 const parsed = parseResult(data.result);
-                diagnosisText.textContent = parsed.diagnosis;
-                reasoningText.textContent = parsed.thinking || "No detailed reasoning process provided by the model.";
+                    diagnosisText.textContent = String(parsed.diagnosis || '').replace(/^\s+/, '').replace(/\s+$/, '');
+                    reasoningText.textContent = String(parsed.thinking || "No detailed reasoning process provided by the model.").replace(/\s+$/, '');
                 
                 if (parsed.answer) {
-                    answerText.textContent = parsed.answer;
+                        answerText.textContent = String(parsed.answer || '').replace(/^\s+/, '').replace(/\s+$/, '');
                     answerSection.classList.remove('hidden');
                 } else {
                     answerSection.classList.add('hidden');
@@ -483,8 +483,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (pendingReasoning || pendingDiagnosis || pendingAnswer) return;
                 if (flushRaf) return;
                 setCursorTarget('none');
-                diagnosisText.textContent = String(diagnosisText.textContent || '').replace(/^\s+/, '');
-                answerText.textContent = String(answerText.textContent || '').replace(/^\s+/, '');
+                diagnosisText.textContent = String(diagnosisText.textContent || '').replace(/^\s+/, '').replace(/\s+$/, '');
+                reasoningText.textContent = String(reasoningText.textContent || '').replace(/\s+$/, '');
+                answerText.textContent = String(answerText.textContent || '').replace(/^\s+/, '').replace(/\s+$/, '');
                 if (!sawAnswer) {
                     answerSection.classList.add('hidden');
                     answerText.textContent = '';
