@@ -29,7 +29,7 @@
             <section class="panel input-panel">
                 <div class="panel-header">
                     <h2><i class="fa-solid fa-chart-line"></i> Summary</h2>
-                    <p>Internal only. Data source: DATA_COLLECTION_DIR</p>
+                    <p>Internal only. Region is derived from IP geolocation. Data source: DATA_COLLECTION_DIR</p>
                 </div>
 
                 <div class="analytics-cards" id="summaryCards">
@@ -48,7 +48,7 @@
                 </div>
 
                 <div class="analytics-section">
-                    <div class="section-title"><i class="fa-solid fa-flag"></i> Country Breakdown</div>
+                    <div class="section-title"><i class="fa-solid fa-flag"></i> Region Breakdown</div>
                     <div class="analytics-box">
                         <div class="analytics-box-inner" id="countryTable"></div>
                     </div>
@@ -74,7 +74,7 @@
                     <div id="map" class="analytics-map"></div>
                     <div class="disclaimer" style="margin-top: 1rem;">
                         <i class="fa-solid fa-circle-info"></i>
-                        Country markers are derived from request geo headers (if present). Unknown locations are not plotted.
+                        Markers are derived from IP geolocation. Unknown locations are not plotted.
                     </div>
                 </div>
 

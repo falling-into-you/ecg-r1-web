@@ -91,6 +91,23 @@ def _is_public_ip(ip: str) -> bool:
         return False
     return True
 
+def _normalize_geo_policy(geo: dict) -> dict:
+    if not isinstance(geo, dict):
+        return geo
+    tw_as_cn = os.environ.get("GEO_OVERRIDE_TW_AS_CN", "0").strip().lower() in ("1", "true", "yes", "on")
+    cc = (geo.get("country_code") or geo.get("country") or "").strip().upper()
+    region = (geo.get("region") or "").strip()
+    city = (geo.get("city") or "").strip()
+    country_name = (geo.get("country_name") or "").strip()
+    if tw_as_cn and cc == "TW":
+        geo = dict(geo)
+        geo["country_code"] = "CN"
+        geo["country_name"] = "China"
+        geo["region"] = region or "Taiwan"
+        geo["city"] = city or geo.get("city")
+        geo["source"] = geo.get("source") or "ip-api"
+    return geo
+
 def _lookup_geo_ipapi(ip: str) -> Optional[dict]:
     enabled = os.environ.get("ENABLE_GEOIP_LOOKUP", "1").strip().lower() not in ("0", "false", "no", "off")
     if not enabled:
@@ -103,7 +120,7 @@ def _lookup_geo_ipapi(ip: str) -> Optional[dict]:
         ts, val = cached
         if now - float(ts or 0.0) < 86400:
             return val
-    url = f"http://ip-api.com/json/{urllib.parse.quote(ip)}?fields=status,message,countryCode,regionName,city,query"
+    url = f"http://ip-api.com/json/{urllib.parse.quote(ip)}?fields=status,message,country,countryCode,regionName,city,lat,lon,query"
     try:
         with urllib.request.urlopen(url, timeout=1.5) as resp:
             data = json.loads(resp.read().decode("utf-8", errors="ignore") or "{}")
@@ -114,11 +131,15 @@ def _lookup_geo_ipapi(ip: str) -> Optional[dict]:
         _geoip_cache[ip] = (now, None)
         return None
     geo = {
-        "country": data.get("countryCode"),
+        "country_code": data.get("countryCode"),
+        "country_name": data.get("country"),
         "region": data.get("regionName"),
         "city": data.get("city"),
+        "lat": data.get("lat"),
+        "lon": data.get("lon"),
         "source": "ip-api",
     }
+    geo = _normalize_geo_policy(geo)
     _geoip_cache[ip] = (now, geo)
     return geo
 
@@ -314,11 +335,12 @@ def _load_request_record(path: str) -> Optional[dict]:
 def _compute_analytics() -> dict:
     total = 0
     unique_ips = set()
-    by_country = Counter()
+    by_region = Counter()
     by_ip = Counter()
     by_day = Counter()
     feedback = Counter()
     recent = []
+    by_point = defaultdict(int)
 
     for path in _iter_request_json_paths():
         rec = _load_request_record(path)
@@ -337,14 +359,30 @@ def _compute_analytics() -> dict:
         by_ip[ip] += 1
 
         geo = client.get("geo") if isinstance(client.get("geo"), dict) else {}
-        country = geo.get("country")
-        if not country:
+        country_name = geo.get("country_name") or geo.get("country")
+        country_code = geo.get("country_code")
+        region = geo.get("region")
+        city = geo.get("city")
+        lat = geo.get("lat")
+        lon = geo.get("lon")
+        if not (country_name and region and lat is not None and lon is not None):
             resolved = _lookup_geo_ipapi(ip)
-            if resolved and resolved.get("country"):
-                geo = resolved
-                country = resolved.get("country")
-        country = country or "unknown"
-        by_country[country] += 1
+            if resolved:
+                country_name = resolved.get("country_name") or country_name
+                country_code = resolved.get("country_code") or country_code
+                region = resolved.get("region") or region
+                city = resolved.get("city") or city
+                lat = resolved.get("lat") if resolved.get("lat") is not None else lat
+                lon = resolved.get("lon") if resolved.get("lon") is not None else lon
+
+        country_name = (country_name or "Unknown").strip()
+        region = (region or "Unknown").strip()
+        city = (city or "").strip()
+        location_label = f"{country_name} / {region}" if region else country_name
+        by_region[location_label] += 1
+        if lat is not None and lon is not None and country_name != "Unknown" and region != "Unknown":
+            key = (float(lat), float(lon), location_label)
+            by_point[key] += 1
 
         fb = rec.get("feedback")
         if isinstance(fb, str) and fb:
@@ -356,18 +394,24 @@ def _compute_analytics() -> dict:
                 "timestamp": ts,
                 "date": date,
                 "ip": ip,
-                "country": country,
+                "country": country_name,
+                "region": region,
+                "city": city,
                 "feedback": fb,
             })
 
     return {
         "total_requests": total,
         "unique_ips": len(unique_ips),
-        "by_country": by_country.most_common(),
+        "by_region": by_region.most_common(),
         "by_ip": by_ip.most_common(200),
         "by_day": sorted(by_day.items()),
         "feedback": feedback,
         "recent": recent,
+        "markers": [
+            {"lat": lat, "lon": lon, "label": label, "count": count}
+            for (lat, lon, label), count in sorted(by_point.items(), key=lambda x: x[1], reverse=True)[:500]
+        ],
     }
 
 _analytics_cache = {"ts": 0.0, "data": None}
