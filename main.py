@@ -16,6 +16,8 @@ import datetime
 import uuid
 import time
 import ipaddress
+import urllib.request
+import urllib.parse
 from contextlib import asynccontextmanager
 
 # Force flush stdout
@@ -77,6 +79,48 @@ def _client_geo(request: Request) -> dict:
         "city": city,
         "source": "headers" if any([country, region, city]) else None,
     }
+
+_geoip_cache = {}
+
+def _is_public_ip(ip: str) -> bool:
+    try:
+        ipa = ipaddress.ip_address(ip)
+    except Exception:
+        return False
+    if ipa.is_private or ipa.is_loopback or ipa.is_link_local or ipa.is_reserved or ipa.is_multicast:
+        return False
+    return True
+
+def _lookup_geo_ipapi(ip: str) -> Optional[dict]:
+    enabled = os.environ.get("ENABLE_GEOIP_LOOKUP", "1").strip().lower() not in ("0", "false", "no", "off")
+    if not enabled:
+        return None
+    if not _is_public_ip(ip):
+        return None
+    now = time.time()
+    cached = _geoip_cache.get(ip)
+    if cached:
+        ts, val = cached
+        if now - float(ts or 0.0) < 86400:
+            return val
+    url = f"http://ip-api.com/json/{urllib.parse.quote(ip)}?fields=status,message,countryCode,regionName,city,query"
+    try:
+        with urllib.request.urlopen(url, timeout=1.5) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="ignore") or "{}")
+    except Exception:
+        _geoip_cache[ip] = (now, None)
+        return None
+    if not isinstance(data, dict) or data.get("status") != "success":
+        _geoip_cache[ip] = (now, None)
+        return None
+    geo = {
+        "country": data.get("countryCode"),
+        "region": data.get("regionName"),
+        "city": data.get("city"),
+        "source": "ip-api",
+    }
+    _geoip_cache[ip] = (now, geo)
+    return geo
 
 def _require_internal(request: Request) -> None:
     ip = _client_ip(request)
@@ -293,7 +337,13 @@ def _compute_analytics() -> dict:
         by_ip[ip] += 1
 
         geo = client.get("geo") if isinstance(client.get("geo"), dict) else {}
-        country = geo.get("country") or "unknown"
+        country = geo.get("country")
+        if not country:
+            resolved = _lookup_geo_ipapi(ip)
+            if resolved and resolved.get("country"):
+                geo = resolved
+                country = resolved.get("country")
+        country = country or "unknown"
         by_country[country] += 1
 
         fb = rec.get("feedback")
