@@ -26,6 +26,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.requests import Request
+from fastapi.middleware.cors import CORSMiddleware
 import json
 
 # Global engine variable
@@ -205,6 +206,15 @@ async def lifespan(app: FastAPI):
     print("Shutting down...")
 
 app = FastAPI(lifespan=lifespan)
+
+# Add CORS middleware to allow requests from other servers
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Allow all methods
+    allow_headers=["*"],  # Allow all headers
+)
 
 # Setup directories
 os.makedirs(DATA_COLLECTION_DIR, exist_ok=True)
