@@ -10,7 +10,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/icons/css/all.min.css">
-    <link rel="stylesheet" href="/static/style.css?v=20260131-5">
+    <link rel="stylesheet" href="/static/style.css?v=20260201-2">
     <link rel="stylesheet" href="/static/responsive.css">
 </head>
 <body>
@@ -75,16 +75,17 @@
                 <section class="panel input-panel">
                     <div class="panel-header">
                         <h2><i class="fa-solid fa-list-check"></i> Input Requirements</h2>
-                        <p>十二导联十秒 ECG 分析效果最佳</p>
+                        <p>Best performance with a 12-lead, 10-second ECG</p>
                     </div>
                     <div class="input-requirements">
                         <ul class="requirements-list">
-                            <li>信号输入：需同时上传 .dat 与 .hea（字段名均为 ecg）</li>
-                            <li>图片输入：支持 .png / .jpg</li>
+                            <li>Signal input: upload both .dat and .hea (field name: ecg)</li>
+                            <li>Image input: .png / .jpg / .jpeg</li>
                         </ul>
                         <div class="requirements-example">
-                            <div class="requirements-example-title">示例图片</div>
-                            <img class="requirements-example-img" src="/static/example/49722328-0.png" alt="Example ECG Input">
+                            <div class="requirements-example-title">Example image</div>
+                            <img class="requirements-example-img" id="exampleEcgImage" src="/static/example/49722328-0.png" alt="Example ECG Input">
+                            <div class="requirements-example-hint">Click the example image to use it as your input.</div>
                         </div>
                     </div>
                 </section>
@@ -192,6 +193,6 @@
         </div>
     </main>
 
-    <script src="/static/script.js?v=20260131-18"></script>
+    <script src="/static/script.js?v=20260201-2"></script>
 </body>
 </html>

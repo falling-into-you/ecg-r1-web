@@ -8,6 +8,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const imagePreview = document.getElementById('imagePreview');
     const imageFileName = document.getElementById('imageFileName');
     const removeImageBtn = document.getElementById('removeImageBtn');
+    const exampleEcgImage = document.getElementById('exampleEcgImage');
     const ecgFileName = document.getElementById('ecgFileName');
     const submitBtn = document.getElementById('submitBtn');
     
@@ -303,6 +304,27 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             reader.readAsDataURL(file);
         }
+    }
+
+    async function setImageInputFile(file) {
+        if (!file) return;
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        imageInput.files = dt.files;
+        handleImageSelect(file);
+    }
+
+    if (exampleEcgImage) {
+        exampleEcgImage.addEventListener('click', async () => {
+            try {
+                const resp = await fetch(exampleEcgImage.src, { cache: 'force-cache' });
+                const blob = await resp.blob();
+                const file = new File([blob], 'example.png', { type: blob.type || 'image/png' });
+                await setImageInputFile(file);
+            } catch (e) {
+                alert('Failed to load example image.');
+            }
+        });
     }
 
     removeImageBtn.addEventListener('click', (e) => {
