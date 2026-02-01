@@ -8,108 +8,116 @@ ECG-R1 Web 是一个专为心电图（ECG）智能诊断模型设计的交互式
 ### 2.1 技术栈
 - **后端**: Python 3.10+, FastAPI, Uvicorn, Jinja2 Templates
 - **前端**: Vanilla JavaScript (ES6+), CSS3 (Flex/Grid), HTML5
-- **通信**: HTTP/2 (SSE for streaming), RESTful API
-- **部署**: Nginx 反向代理 (Port 80 -> 8000), Systemd Service
+- **通信**: SSE（流式）+ RESTful API
+- **部署**: Nginx 反向代理 + 单实例 FastAPI
+  - **8000**: FastAPI/uvicorn 进程监听（内部端口）
+  - **80**: Web 前端入口（Nginx -> 8000）
+  - **44000**: 远程推理 API 入口（Nginx -> 8000，API-only）
 
 ### 2.2 数据流向
-1. **上传**: 用户上传 `.dat` 和 `.hea` 文件 -> 后端暂存 -> 调用 `ECG_R1` 模型引擎。
-2. **推理**: 模型生成 Token 流 -> 后端封装为 SSE 事件 (`data: {...}`) -> 推送至前端。
-3. **解析**: 前端接收 Chunk -> 正则匹配标签 (`<think>`, `<answer>`) -> 分流至不同 UI 区域。
-4. **反馈**: 用户提交反馈 -> 后端追加写入 `data.json`。
+1. **上传**: 用户上传 `.dat` 和 `.hea` 文件（或图片） -> 后端暂存 -> 调用 `ECG_R1` 模型引擎。
+2. **推理**: 模型生成 Token 流 -> 后端封装为 SSE 事件 -> 推送至前端。
+3. **解析**: 前端接收 chunk -> 解析标签（`<think>`, `<answer>`）-> 分流到不同 UI 区域。
+4. **反馈**: 用户点赞/点踩并可选填写文本 -> `/feedback` 写入 `data.json`。
 
 ## 3. 关键功能与核心代码
 
-### 3.1 文件上传与路径处理
-后端支持同时接收多个文件，并自动识别 `wfdb` 格式所需的 Record Name（去除后缀），解决了 `.hea.hea` 路径拼接错误问题。
+### 3.1 文件上传与路径处理（wfdb）
+后端支持同时接收多个文件，并自动识别 `wfdb` 格式所需的 Record Name（去除后缀），避免出现 `.hea.hea` 之类的路径拼接问题。
 
-**关键代码 (`main.py`)**:
-```python
-@app.post("/predict_stream")
-async def predict_stream(ecg: list[UploadFile] = File(...)):
-    # ... 保存文件 ...
-    # 自动提取 Record Name (如 "record_100.dat" -> "record_100")
-    record_name = os.path.splitext(ecg[0].filename)[0]
-    objects_dict['ecg'] = os.path.join(temp_dir, record_name) 
-    # ...
+关键实现：后端接收文件后，将 `objects_dict['ecg']` 指向 record 的不带后缀路径。
+
+### 3.2 流式推理与标签解析（前端状态机）
+前端实现了一个流式解析状态机，实时识别模型输出中的 XML 风格标签，并分流展示：
+- **Reasoning Process**：`<think>...</think>`
+- **Interpretation Summary**：常规文本段落
+- **Final Answer**：`<answer>...</answer>`
+
+关键实现位置：
+- [script.js](file:///data/jinjiarui/run/ecg-r1-web/static/script.js)
+
+### 3.3 打字机效果与缓冲渲染
+为避免流式输出过快导致 DOM 高频更新卡顿，前端把内容先累积到 `pending*` 缓冲区，再用 `requestAnimationFrame` 分片渲染（打字机效果）。
+
+关键实现位置：
+- [script.js](file:///data/jinjiarui/run/ecg-r1-web/static/script.js)
+
+### 3.4 用户反馈系统（Like/Dislike + Optional Text）
+用户点击点赞/点踩后弹出反馈框：
+- 展示“你已点赞/点踩”的提示
+- 提供可选文本输入（Optional）
+- Submit 后调用 `/feedback` 写入 `data.json`
+
+关键实现位置：
+- [index.html](file:///data/jinjiarui/run/ecg-r1-web/templates/index.html)
+- [style.css](file:///data/jinjiarui/run/ecg-r1-web/static/style.css)
+- [script.js](file:///data/jinjiarui/run/ecg-r1-web/static/script.js)
+- [main.py](file:///data/jinjiarui/run/ecg-r1-web/main.py)
+
+### 3.5 移动端响应式
+小屏幕下由左右两列改为上下布局，避免移动端“右侧内容消失”。
+
+关键实现位置：
+- [responsive.css](file:///data/jinjiarui/run/ecg-r1-web/static/responsive.css)
+
+### 3.6 图标本地化
+将 FontAwesome 资源下载到本地并通过本地 CSS 引用，同时设置心跳图标为站点 Favicon。
+
+关键实现位置：
+- [index.html](file:///data/jinjiarui/run/ecg-r1-web/templates/index.html)
+- [static/icons](file:///data/jinjiarui/run/ecg-r1-web/static/icons)
+
+## 4. 远程推理 API（Port 44000）
+
+### 4.1 设计目标
+为“未来前端不在本机服务器部署”的场景提供稳定的远程推理入口：
+- 复用同一个 FastAPI 推理进程（8000），避免重复加载模型
+- 通过 Nginx 新增暴露 44000 端口
+- 44000 端口为 **API-only**：仅放行推理相关路径，其它路径（包括 `/`）返回 404
+- 允许跨域调用（CORS）
+
+### 4.2 端口行为
+- `GET http://<server-ip>:44000/status`
+- `POST http://<server-ip>:44000/predict_stream`（SSE）
+- `POST http://<server-ip>:44000/predict`（JSON）
+- `POST http://<server-ip>:44000/feedback`（可选）
+- `GET http://<server-ip>:44000/` -> 404
+
+### 4.3 Nginx 配置
+系统生效配置文件：`/etc/nginx/conf.d/ecg_r1_web.conf`
+
+仓库内提供可复用的版本化配置：
+- [deploy/nginx/ecg_r1_web.conf](file:///data/jinjiarui/run/ecg-r1-web/deploy/nginx/ecg_r1_web.conf)
+
+### 4.4 CORS（FastAPI）
+后端通过 `CORSMiddleware` 允许跨域访问（不使用 cookies 场景）。
+
+关键实现位置：
+- [main.py](file:///data/jinjiarui/run/ecg-r1-web/main.py)
+
+### 4.5 调用示例（curl）
+流式推理（multipart/form-data，字段命名与现有前端保持一致）：
+
+```bash
+curl -N -X POST http://<server-ip>:44000/predict_stream \
+  -F "ecg=@record.dat" \
+  -F "ecg=@record.hea"
 ```
-
-### 3.2 流式推理与标签解析
-前端实现了一个状态机，能够实时解析模型输出的 XML 风格标签，将内容动态分流到三个区域：
-1. **Reasoning Process** (`<think>...</think>`)
-2. **Interpretation Summary** (常规文本)
-3. **Final Answer** (`<answer>...</answer>`)
-
-**关键代码 (`static/script.js` - `routeContentChunk`)**:
-```javascript
-function routeContentChunk(chunk) {
-    // 处理 buffer 和边界情况
-    // 状态机检测 <think>, </think>, <answer>, </answer>
-    if (tag === '<think>') {
-        streamState.inThink = true;
-    } else if (tag === '<answer>') {
-        streamState.inAnswer = true;
-        // 显示隐藏的 Answer 区域
-        if (answerSection.classList.contains('hidden')) {
-             answerSection.classList.remove('hidden');
-        }
-    }
-    // ... 分流内容到 pendingReasoning / pendingAnswer / pendingDiagnosis
-}
-```
-
-### 3.3 打字机效果与缓冲区管理
-为了保证流畅的视觉体验，前端使用了 `requestAnimationFrame` 实现平滑的打字机效果，并维护了独立的缓冲区队列，防止流式速度过快导致页面卡顿。
-
-**关键代码 (`static/script.js` - `flushStep`)**:
-```javascript
-function flushStep() {
-    const step = 48; // 每次渲染字符数
-    // 优先级：Reasoning > Answer > Diagnosis
-    if (pendingReasoning) {
-        // ... 渲染 Reasoning ...
-    } else if (pendingAnswer) {
-        // ... 渲染 Final Answer ...
-    } else if (pendingDiagnosis) {
-        // ... 渲染 Summary ...
-    }
-    // 循环调用直到队列清空
-}
-```
-
-### 3.4 用户反馈系统
-支持在推理过程中或结束后随时提交反馈。系统通过 Response Header 立即获取 `X-Request-ID`，确保用户无需等待推理完成即可点赞/点踩。
-
-**关键代码 (`static/script.js` & `main.py`)**:
-- **前端**: `currentRequestId = response.headers.get('x-request-id');` (立即获取 ID)
-- **后端**: 
-```python
-@app.post("/feedback")
-async def feedback(request: FeedbackRequest):
-    entry = {
-        "request_id": request.request_id,
-        "feedback_type": request.feedback_type,
-        "feedback_comment": request.comment, # 可选评论
-        "timestamp": datetime.now().isoformat()
-    }
-    # 线程安全地写入 data.json
-```
-
-## 4. UI/UX 设计细节
-- **响应式布局**: 通过 `static/responsive.css` 适配移动端，小屏幕下自动切换为单列垂直布局。
-- **状态反馈**: 加载状态、打字机光标 (`.streaming` 类)、结果区域的动态展开/隐藏。
-- **图标系统**: 本地化 FontAwesome 图标库，确保离线环境可用；自定义心跳 Favicon。
 
 ## 5. 目录结构
 ```
 /data/jinjiarui/run/ecg-r1-web/
-├── main.py              # 后端核心逻辑
+├── main.py
 ├── templates/
-│   └── index.html       # 主页面结构
+│   └── index.html
 ├── static/
-│   ├── script.js        # 前端交互与流式解析
-│   ├── style.css        # 核心样式
-│   ├── responsive.css   # 移动端适配样式
-│   └── icons/           # 本地图标资源
-├── data.json            # 反馈数据存储
-└── PROJECT.md           # 项目变更日志
+│   ├── script.js
+│   ├── style.css
+│   ├── responsive.css
+│   └── icons/
+├── deploy/
+│   └── nginx/
+│       └── ecg_r1_web.conf
+├── data.json
+└── PROJECT.md
 ```
