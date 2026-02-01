@@ -42,3 +42,23 @@ curl -N -X POST http://<server-ip>:44000/predict_stream \
 - `curl -I http://127.0.0.1:44000/` -> 404
 - `curl http://127.0.0.1:44000/status` -> online JSON
 - `curl -i -X OPTIONS http://127.0.0.1:44000/predict_stream` -> 204 + CORS 头
+
+## 8. 一键测试脚本
+仓库提供了一个脚本用于验证：
+- 44000 是否为 API-only（`GET /` 应为 404）
+- `/predict` 是否返回 JSON
+- `/predict_stream` 是否返回 `text/event-stream` 且能持续输出（包含 `event: ready` / `event: ping` / `event: content` 等）
+
+脚本路径：
+- [test_remote_api_44000.sh](file:///data/jinjiarui/run/ecg-r1-web/scripts/test_remote_api_44000.sh)
+
+用法（默认测本机 44000）：
+```bash
+bash scripts/test_remote_api_44000.sh
+```
+
+用法（指定服务器）：
+```bash
+bash scripts/test_remote_api_44000.sh http://<server-ip>:44000
+```
+
