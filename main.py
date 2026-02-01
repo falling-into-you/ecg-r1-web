@@ -49,6 +49,15 @@ def _safe_filename(name: str) -> str:
     return base or "file"
 
 def _client_ip(request: Request) -> str:
+    for key in ("cf-connecting-ip", "true-client-ip", "x-real-ip"):
+        raw = request.headers.get(key)
+        if raw:
+            ip = raw.strip()
+            try:
+                ipaddress.ip_address(ip)
+                return ip
+            except Exception:
+                pass
     xff = request.headers.get("x-forwarded-for")
     if xff:
         for part in xff.split(","):
@@ -73,12 +82,14 @@ def _client_geo(request: Request) -> dict:
     country = request.headers.get("cf-ipcountry") or request.headers.get("x-geo-country") or request.headers.get("x-country")
     region = request.headers.get("x-geo-region") or request.headers.get("x-region")
     city = request.headers.get("x-geo-city") or request.headers.get("x-city")
-    return {
+    geo = {
         "country": country,
+        "country_code": country,
         "region": region,
         "city": city,
         "source": "headers" if any([country, region, city]) else None,
     }
+    return _normalize_geo_policy(geo)
 
 _geoip_cache = {}
 
@@ -94,7 +105,7 @@ def _is_public_ip(ip: str) -> bool:
 def _normalize_geo_policy(geo: dict) -> dict:
     if not isinstance(geo, dict):
         return geo
-    tw_as_cn = os.environ.get("GEO_OVERRIDE_TW_AS_CN", "0").strip().lower() in ("1", "true", "yes", "on")
+    tw_as_cn = os.environ.get("GEO_OVERRIDE_TW_AS_CN", "1").strip().lower() in ("1", "true", "yes", "on")
     cc = (geo.get("country_code") or geo.get("country") or "").strip().upper()
     region = (geo.get("region") or "").strip()
     city = (geo.get("city") or "").strip()

@@ -60,6 +60,39 @@
 - **image**：ECG 图片（png/jpg）
 - **ecg**：ECG 信号文件（必须同时提供 `.dat` 与 `.hea`，字段名相同 `ecg`，多文件上传）
 
+### 5.3 客户端 IP 与地理信息透传（非常重要）
+当“业务前端服务器”作为反向代理把请求转发到显卡服务器 `:44000` 时，如果不透传客户端 IP，显卡服务器侧记录的 `client.ip` 可能会变成代理服务器的 IP。
+
+推荐做法：由前端服务器在转发时追加/透传以下头部（标准做法）：
+- `X-Forwarded-For: $proxy_add_x_forwarded_for`（保留链路：client, proxy1, proxy2...）
+- `X-Real-IP: $remote_addr`
+
+如果前端服务器本身在 CDN/网关之后（例如 Cloudflare），也可以额外透传：
+- `CF-Connecting-IP`
+- `CF-IPCountry`
+
+为了在 Analytics 页面显示到“地区”级别，建议前端服务器（或网关）在可获得地理信息时透传：
+- `X-Geo-Country`（国家码）
+- `X-Geo-Region`（地区/省州）
+- `X-Geo-City`（城市）
+
+前端服务器 Nginx 示例片段：
+```nginx
+location / {
+    proxy_pass http://<gpu-server-ip>:44000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+显卡服务器侧解析优先级：
+- `CF-Connecting-IP` / `True-Client-IP` / `X-Real-IP`（若存在）
+- 否则解析 `X-Forwarded-For` 的链路
+
+安全提示：如果对公网开放 44000，务必只信任来自“已知反向代理”的这些头部（否则客户端可伪造）。
+
 ### 5.2 Request ID
 - `/predict`：在 JSON 返回体里返回 `request_id`
 - `/predict_stream`：
@@ -233,3 +266,5 @@ bash scripts/test_predict_stream_with_image.sh http://127.0.0.1:44000 /data/jinj
   - 模型首轮推理可能较慢，脚本可调大 `TIMEOUT_PREDICT` / `TIMEOUT_STREAM`
 - 44000 能打开页面：
   - 说明 Nginx 未做 API 白名单或未对 `/` 返回 404，需要检查 44000 server block 配置
+
+可关闭该策略：`GEO_OVERRIDE_TW_AS_CN=0`。
