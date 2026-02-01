@@ -43,38 +43,10 @@ loading_logs = []
 model_loading_status = "pending" # pending, loading, success, failed
 stream_states = {}
 
-def _trusted_proxy_networks() -> list[ipaddress._BaseNetwork]:
-    raw = os.environ.get("TRUSTED_PROXY_CIDRS", "127.0.0.1/32,::1/128")
-    nets = []
-    for part in raw.split(","):
-        s = part.strip()
-        if not s:
-            continue
-        try:
-            nets.append(ipaddress.ip_network(s, strict=False))
-        except Exception:
-            continue
-    return nets
-
-_TRUSTED_PROXY_NETS = _trusted_proxy_networks()
-
 def _peer_ip(request: Request) -> str:
     if request.client and request.client.host:
         return request.client.host
     return "unknown"
-
-def _is_ip_in_trusted_proxies(ip: str) -> bool:
-    try:
-        ipa = ipaddress.ip_address(ip)
-    except Exception:
-        return False
-    for net in _TRUSTED_PROXY_NETS:
-        try:
-            if ipa in net:
-                return True
-        except Exception:
-            continue
-    return False
 
 def _safe_filename(name: str) -> str:
     base = os.path.basename(str(name or "")).strip()
@@ -82,10 +54,6 @@ def _safe_filename(name: str) -> str:
     return base or "file"
 
 def _client_ip(request: Request) -> str:
-    peer = _peer_ip(request)
-    if not _is_ip_in_trusted_proxies(peer):
-        return peer
-
     candidates = []
     for key in ("cf-connecting-ip", "true-client-ip", "x-real-ip"):
         raw = request.headers.get(key)
@@ -111,7 +79,7 @@ def _client_ip(request: Request) -> str:
         return public_ip
     if fallback_ip:
         return fallback_ip
-    return peer
+    return _peer_ip(request)
 
 def _client_geo(request: Request) -> dict:
     country = request.headers.get("cf-ipcountry") or request.headers.get("x-geo-country") or request.headers.get("x-country")
@@ -475,6 +443,18 @@ async def admin_analytics_data(request: Request):
         _analytics_cache["data"] = _compute_analytics()
         _analytics_cache["ts"] = now
     return JSONResponse(content=_analytics_cache["data"])
+
+@app.get("/admin/whoami")
+async def admin_whoami(request: Request):
+    _require_internal(request)
+    return JSONResponse(content={
+        "peer_ip": _peer_ip(request),
+        "client_ip": _client_ip(request),
+        "geo": _client_geo(request),
+        "x_forwarded_for": request.headers.get("x-forwarded-for"),
+        "x_real_ip": request.headers.get("x-real-ip"),
+        "cf_connecting_ip": request.headers.get("cf-connecting-ip"),
+    })
 
 @app.post("/predict")
 async def predict(request: Request, image: Optional[UploadFile] = File(None), ecg: list[UploadFile] = File(None)):

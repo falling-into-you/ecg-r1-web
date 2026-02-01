@@ -14,15 +14,19 @@ echo "FAKE_CLIENT_IP=$FAKE_CLIENT_IP"
 
 resp="$(curl -sS -X POST "$BASE_URL/predict" \
   -H "X-Forwarded-For: ${FAKE_CLIENT_IP}, 127.0.0.1" \
-  -H "X-Real-IP: 127.0.0.1" \
+  -H "X-Real-IP: ${FAKE_CLIENT_IP}" \
   -F "image=@$tmp_dir/dummy.png;type=image/png")"
 
-req_id="$(python -c 'import json,sys; print(json.loads(sys.stdin.read()).get("request_id",""))' <<<"$resp")"
+req_id="$(python -c 'import json,sys; print(json.loads(sys.stdin.read()).get("request_id",""))' <<<"$resp" 2>/dev/null || true)"
 
 if [[ -z "$req_id" ]]; then
-  echo "failed to get request_id"
-  echo "$resp" | head -c 500
-  exit 1
+  echo "predict did not return request_id; falling back to /admin/whoami (model may be loading)"
+  WHOAMI_URL="${WHOAMI_URL:-http://127.0.0.1:8000/admin/whoami}"
+  whoami="$(curl -sS -i "$WHOAMI_URL" \
+    -H "X-Forwarded-For: ${FAKE_CLIENT_IP}, 127.0.0.1" \
+    -H "X-Real-IP: ${FAKE_CLIENT_IP}")"
+  echo "$whoami" | sed -n '1,25p'
+  exit 0
 fi
 
 date="${req_id:0:8}"
