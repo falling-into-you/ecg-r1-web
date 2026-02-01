@@ -43,40 +43,75 @@ loading_logs = []
 model_loading_status = "pending" # pending, loading, success, failed
 stream_states = {}
 
+def _trusted_proxy_networks() -> list[ipaddress._BaseNetwork]:
+    raw = os.environ.get("TRUSTED_PROXY_CIDRS", "127.0.0.1/32,::1/128")
+    nets = []
+    for part in raw.split(","):
+        s = part.strip()
+        if not s:
+            continue
+        try:
+            nets.append(ipaddress.ip_network(s, strict=False))
+        except Exception:
+            continue
+    return nets
+
+_TRUSTED_PROXY_NETS = _trusted_proxy_networks()
+
+def _peer_ip(request: Request) -> str:
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+def _is_ip_in_trusted_proxies(ip: str) -> bool:
+    try:
+        ipa = ipaddress.ip_address(ip)
+    except Exception:
+        return False
+    for net in _TRUSTED_PROXY_NETS:
+        try:
+            if ipa in net:
+                return True
+        except Exception:
+            continue
+    return False
+
 def _safe_filename(name: str) -> str:
     base = os.path.basename(str(name or "")).strip()
     base = base.replace("/", "_").replace("\\", "_").replace("\x00", "")
     return base or "file"
 
 def _client_ip(request: Request) -> str:
+    peer = _peer_ip(request)
+    if not _is_ip_in_trusted_proxies(peer):
+        return peer
+
+    candidates = []
     for key in ("cf-connecting-ip", "true-client-ip", "x-real-ip"):
         raw = request.headers.get(key)
         if raw:
-            ip = raw.strip()
-            try:
-                ipaddress.ip_address(ip)
-                return ip
-            except Exception:
-                pass
+            candidates.append(raw.strip())
     xff = request.headers.get("x-forwarded-for")
     if xff:
-        for part in xff.split(","):
-            ip = part.strip()
-            if not ip:
-                continue
-            try:
-                ipa = ipaddress.ip_address(ip)
-            except Exception:
-                continue
-            if ipa.is_private or ipa.is_loopback or ipa.is_link_local or ipa.is_reserved:
-                continue
-            return ip
-        first = xff.split(",")[0].strip()
-        if first:
-            return first
-    if request.client and request.client.host:
-        return request.client.host
-    return "unknown"
+        candidates.extend([p.strip() for p in xff.split(",") if p.strip()])
+
+    public_ip = None
+    fallback_ip = None
+    for ip in candidates:
+        try:
+            ipa = ipaddress.ip_address(ip)
+        except Exception:
+            continue
+        if fallback_ip is None:
+            fallback_ip = ip
+        if not (ipa.is_private or ipa.is_loopback or ipa.is_link_local or ipa.is_reserved or ipa.is_multicast):
+            public_ip = ip
+            break
+    if public_ip:
+        return public_ip
+    if fallback_ip:
+        return fallback_ip
+    return peer
 
 def _client_geo(request: Request) -> dict:
     country = request.headers.get("cf-ipcountry") or request.headers.get("x-geo-country") or request.headers.get("x-country")
@@ -155,7 +190,7 @@ def _lookup_geo_ipapi(ip: str) -> Optional[dict]:
     return geo
 
 def _require_internal(request: Request) -> None:
-    ip = _client_ip(request)
+    ip = _peer_ip(request)
     try:
         ipa = ipaddress.ip_address(ip)
     except Exception:
