@@ -29,47 +29,66 @@
     <main class="main-container">
         <div class="grid-layout">
             <!-- Left Panel: Input -->
-            <section class="panel input-panel">
-                <div class="panel-header">
-                    <h2><i class="fa-solid fa-file-medical"></i> Patient Data Input</h2>
-                    <p>Supports three modalities: Image only / ECG signal only / Image + ECG signal</p>
-                </div>
-                
-                <form id="inferenceForm">
-                    <div class="upload-group">
-                        <label class="input-label">ECG Image</label>
-                        <div class="drop-zone" id="imageDropZone">
-                            <input type="file" id="imageInput" name="image" accept=".png, .jpg" class="file-input">
-                            <div class="drop-content">
-                                <i class="fa-regular fa-image upload-icon"></i>
-                                <p class="upload-text">Drag & drop or click to upload ECG Image</p>
-                                <p class="file-name" id="imageFileName"></p>
-                            </div>
-                            <div class="image-preview-container hidden" id="imagePreviewContainer">
-                                <img id="imagePreview" src="" alt="ECG Preview">
-                                <button type="button" class="remove-btn" id="removeImageBtn"><i class="fa-solid fa-times"></i></button>
+            <div class="left-column">
+                <section class="panel input-panel">
+                    <div class="panel-header">
+                        <h2><i class="fa-solid fa-file-medical"></i> Patient Data Input</h2>
+                        <p>Supports three modalities: Image only / ECG signal only / Image + ECG signal</p>
+                    </div>
+                    
+                    <form id="inferenceForm">
+                        <div class="upload-group">
+                            <label class="input-label">ECG Image</label>
+                            <div class="drop-zone" id="imageDropZone">
+                                <input type="file" id="imageInput" name="image" accept=".png, .jpg" class="file-input">
+                                <div class="drop-content">
+                                    <i class="fa-regular fa-image upload-icon"></i>
+                                    <p class="upload-text">Drag & drop or click to upload ECG Image</p>
+                                    <p class="file-name" id="imageFileName"></p>
+                                </div>
+                                <div class="image-preview-container hidden" id="imagePreviewContainer">
+                                    <img id="imagePreview" src="" alt="ECG Preview">
+                                    <button type="button" class="remove-btn" id="removeImageBtn"><i class="fa-solid fa-times"></i></button>
+                                </div>
                             </div>
                         </div>
-                    </div>
 
-                    <div class="upload-group">
-                        <label class="input-label">ECG Signal File</label>
-                        <div class="file-select-box" id="ecgDropZone">
-                            <input type="file" id="ecgInput" name="ecg" accept=".dat, .hea" multiple class="file-input">
-                            <div class="file-select-content">
-                                <i class="fa-solid fa-wave-square"></i>
-                                <span id="ecgFileName">Select .dat and .hea files...</span>
+                        <div class="upload-group">
+                            <label class="input-label">ECG Signal File</label>
+                            <div class="file-select-box" id="ecgDropZone">
+                                <input type="file" id="ecgInput" name="ecg" accept=".dat, .hea" multiple class="file-input">
+                                <div class="file-select-content">
+                                    <i class="fa-solid fa-wave-square"></i>
+                                    <span id="ecgFileName">Select .dat and .hea files...</span>
+                                </div>
+                                <button type="button" class="browse-btn">Browse</button>
                             </div>
-                            <button type="button" class="browse-btn">Browse</button>
+                        </div>
+
+                        <button type="submit" id="submitBtn" class="analyze-btn">
+                            <span>Start Analysis</span>
+                            <i class="fa-solid fa-arrow-right"></i>
+                        </button>
+                    </form>
+                </section>
+
+                <section class="panel input-panel">
+                    <div class="panel-header">
+                        <h2><i class="fa-solid fa-list-check"></i> Input Requirements</h2>
+                        <p>十二导联十秒 ECG 分析效果最佳</p>
+                    </div>
+                    <div class="input-requirements">
+                        <ul class="requirements-list">
+                            <li>信号输入：需同时上传 .dat 与 .hea（字段名均为 ecg）</li>
+                            <li>图片输入：支持 .png / .jpg</li>
+                        </ul>
+                        <div class="requirements-example">
+                            <div class="requirements-example-title">示例图片</div>
+                            <img class="requirements-example-img" src="/static/example/49722328-0.png" alt="Example ECG Input">
                         </div>
                     </div>
-
-                    <button type="submit" id="submitBtn" class="analyze-btn">
-                        <span>Start Analysis</span>
-                        <i class="fa-solid fa-arrow-right"></i>
-                    </button>
-                </form>
-            </section>
+                </section>
+            </div>
 
             <!-- Right Panel: Result -->
             <section class="panel result-panel">
