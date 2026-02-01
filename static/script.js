@@ -79,6 +79,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const statusBadge = document.querySelector('.status-badge');
     let isSystemOnline = false;
+    const apiBaseMeta = document.querySelector('meta[name="ecg-api-base"]');
+    const apiBase = apiBaseMeta && apiBaseMeta.content ? apiBaseMeta.content.trim().replace(/\/$/, '') : '';
+    const apiUrl = (path) => apiBase ? `${apiBase}${path}` : path;
 
     function openFeedbackDetail(type) {
         pendingFeedbackType = type;
@@ -105,7 +108,7 @@ document.addEventListener('DOMContentLoaded', function() {
         feedbackSubmitBtn.disabled = true;
         try {
             const text = (feedbackComment && feedbackComment.value) ? String(feedbackComment.value).trim() : '';
-            const response = await fetch('/feedback', {
+            const response = await fetch(apiUrl('/feedback'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -168,28 +171,35 @@ document.addEventListener('DOMContentLoaded', function() {
     // --- Check System Status ---
     async function checkSystemStatus() {
         try {
-            const response = await fetch('/status');
+            const response = await fetch(apiUrl('/status'));
             const data = await response.json();
             
             if (data.status === 'online') {
                 isSystemOnline = true;
                 statusBadge.classList.remove('offline');
                 statusBadge.innerHTML = '<i class="fa-solid fa-circle-check"></i> System Online';
+            } else if (data.status === 'loading') {
+                isSystemOnline = false;
+                statusBadge.classList.remove('offline');
+                statusBadge.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> System Loading';
             } else {
                 isSystemOnline = false;
                 statusBadge.classList.add('offline');
                 statusBadge.innerHTML = '<i class="fa-solid fa-circle-xmark"></i> System Offline';
             }
+            statusBadge.title = data.detail ? String(data.detail) : '';
         } catch (error) {
             console.error('Failed to check status:', error);
             isSystemOnline = false;
             statusBadge.classList.add('offline');
             statusBadge.innerHTML = '<i class="fa-solid fa-circle-exclamation"></i> Connection Error';
+            statusBadge.title = '';
         }
     }
     
     // Check status immediately
     checkSystemStatus();
+    setInterval(checkSystemStatus, 10000);
 
     // --- Helper Function to Parse Result ---
     function parseResult(text) {
@@ -364,7 +374,7 @@ document.addEventListener('DOMContentLoaded', function() {
             reasoningText.textContent = '';
 
             const controller = new AbortController();
-            const response = await fetch('/predict_stream', {
+            const response = await fetch(apiUrl('/predict_stream'), {
                 method: 'POST',
                 body: formData,
                 signal: controller.signal,
@@ -393,7 +403,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             const contentType = response.headers.get('content-type') || '';
             if (!contentType.includes('text/event-stream') || !response.body) {
-                const fallbackResp = await fetch('/predict', { method: 'POST', body: new FormData(this) });
+                const fallbackResp = await fetch(apiUrl('/predict'), { method: 'POST', body: new FormData(this) });
                 const data = await fallbackResp.json();
                 if (!fallbackResp.ok) {
                     throw new Error(data.detail || 'Analysis failed');

@@ -234,9 +234,13 @@ async def get_startup_logs():
 
 @app.get("/status")
 async def get_status():
+    if model_loading_status in ("pending", "loading"):
+        return JSONResponse(content={"status": "loading", "detail": f"Model loading ({model_loading_status})", "model_loading_status": model_loading_status})
+    if model_loading_status == "failed":
+        return JSONResponse(content={"status": "offline", "detail": "Model failed to load", "model_loading_status": model_loading_status})
     if engine is None:
-        return JSONResponse(content={"status": "offline", "detail": "Model not loaded"})
-    return JSONResponse(content={"status": "online", "detail": "System ready"})
+        return JSONResponse(content={"status": "offline", "detail": "Model not loaded", "model_loading_status": model_loading_status})
+    return JSONResponse(content={"status": "online", "detail": "System ready", "model_loading_status": model_loading_status})
 
 @app.post("/predict")
 async def predict(request: Request, image: Optional[UploadFile] = File(None), ecg: list[UploadFile] = File(None)):
