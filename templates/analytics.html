@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ECG-R1 Analytics</title>
+    <link rel="icon" type="image/svg+xml" href="/static/icons/favicon.svg">
+    <link rel="stylesheet" href="/static/icons/css/all.min.css">
+    <link rel="stylesheet" href="/static/style.css?v=20260201-1">
+    <link rel="stylesheet" href="/static/responsive.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-content">
+            <div class="logo">
+                <i class="fa-solid fa-heart-pulse"></i>
+                <span>ECG-R1 Analytics</span>
+            </div>
+            <div class="nav-links">
+                <span class="status-badge offline" id="analyticsStatus"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading</span>
+            </div>
+        </div>
+    </nav>
+
+    <main class="main-container">
+        <div class="grid-layout">
+            <section class="panel input-panel">
+                <div class="panel-header">
+                    <h2><i class="fa-solid fa-chart-line"></i> Summary</h2>
+                    <p>Internal only. Data source: DATA_COLLECTION_DIR</p>
+                </div>
+
+                <div class="report-meta" id="summaryCards">
+                    <div class="meta-item">
+                        <span class="label">Total Requests:</span>
+                        <span class="value" id="totalRequests">--</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="label">Unique IPs:</span>
+                        <span class="value" id="uniqueIps">--</span>
+                    </div>
+                    <div class="meta-item">
+                        <span class="label">Feedback:</span>
+                        <span class="value" id="feedbackCounts">--</span>
+                    </div>
+                </div>
+
+                <div class="diagnosis-section" style="margin-top: 1.25rem;">
+                    <div class="section-title"><i class="fa-solid fa-flag"></i> Country Breakdown</div>
+                    <div class="diagnosis-text" id="countryTable" style="background:#fff; border-left-color: var(--border-color);"></div>
+                </div>
+
+                <div class="diagnosis-section">
+                    <div class="section-title"><i class="fa-solid fa-network-wired"></i> Top IPs</div>
+                    <div class="diagnosis-text" id="ipTable" style="background:#fff; border-left-color: var(--border-color);"></div>
+                </div>
+            </section>
+
+            <section class="panel result-panel">
+                <div class="panel-header">
+                    <h2><i class="fa-solid fa-map-location-dot"></i> IP Source Map</h2>
+                    <div class="actions">
+                        <button class="icon-btn" id="refreshBtn" title="Refresh"><i class="fa-solid fa-rotate"></i></button>
+                    </div>
+                </div>
+
+                <div class="result-content" style="display:block;">
+                    <div id="map" style="height: 520px; border-radius: var(--radius-md); border: 1px solid var(--border-color);"></div>
+                    <div class="disclaimer" style="margin-top: 1rem;">
+                        <i class="fa-solid fa-circle-info"></i>
+                        Country markers are derived from request geo headers (if present). Unknown locations are not plotted.
+                    </div>
+                </div>
+
+                <div class="result-content" style="display:block; margin-top: 1rem;">
+                    <div class="section-title"><i class="fa-solid fa-clock-rotate-left"></i> Recent Requests</div>
+                    <div class="diagnosis-text" id="recentTable" style="background:#fff; border-left-color: var(--border-color);"></div>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script src="/static/analytics.js?v=20260201-1"></script>
+</body>
+</html>
+

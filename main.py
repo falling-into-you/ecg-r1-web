@@ -28,6 +28,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.requests import Request
 from fastapi.middleware.cors import CORSMiddleware
 import json
+from collections import Counter, defaultdict
 
 # Global engine variable
 engine = None
@@ -76,6 +77,15 @@ def _client_geo(request: Request) -> dict:
         "city": city,
         "source": "headers" if any([country, region, city]) else None,
     }
+
+def _require_internal(request: Request) -> None:
+    ip = _client_ip(request)
+    try:
+        ipa = ipaddress.ip_address(ip)
+    except Exception:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if not (ipa.is_loopback or ipa.is_private or ipa.is_link_local):
+        raise HTTPException(status_code=403, detail="Forbidden")
 
 def _date_str() -> str:
     return datetime.datetime.now().date().isoformat()
@@ -241,6 +251,90 @@ async def get_status():
     if engine is None:
         return JSONResponse(content={"status": "offline", "detail": "Model not loaded", "model_loading_status": model_loading_status})
     return JSONResponse(content={"status": "online", "detail": "System ready", "model_loading_status": model_loading_status})
+
+def _iter_request_json_paths() -> list[str]:
+    paths = []
+    for root, dirs, files in os.walk(DATA_COLLECTION_DIR):
+        if "data.json" in files:
+            paths.append(os.path.join(root, "data.json"))
+    paths.sort(reverse=True)
+    return paths
+
+def _load_request_record(path: str) -> Optional[dict]:
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+def _compute_analytics() -> dict:
+    total = 0
+    unique_ips = set()
+    by_country = Counter()
+    by_ip = Counter()
+    by_day = Counter()
+    feedback = Counter()
+    recent = []
+
+    for path in _iter_request_json_paths():
+        rec = _load_request_record(path)
+        if not isinstance(rec, dict):
+            continue
+        total += 1
+        request_id = rec.get("request_id")
+        ts = rec.get("timestamp")
+        date = rec.get("date") or (ts[:10] if isinstance(ts, str) and len(ts) >= 10 else None)
+        if date:
+            by_day[date] += 1
+
+        client = rec.get("client") if isinstance(rec.get("client"), dict) else {}
+        ip = client.get("ip") or "unknown"
+        unique_ips.add(ip)
+        by_ip[ip] += 1
+
+        geo = client.get("geo") if isinstance(client.get("geo"), dict) else {}
+        country = geo.get("country") or "unknown"
+        by_country[country] += 1
+
+        fb = rec.get("feedback")
+        if isinstance(fb, str) and fb:
+            feedback[fb] += 1
+
+        if len(recent) < 50:
+            recent.append({
+                "request_id": request_id,
+                "timestamp": ts,
+                "date": date,
+                "ip": ip,
+                "country": country,
+                "feedback": fb,
+            })
+
+    return {
+        "total_requests": total,
+        "unique_ips": len(unique_ips),
+        "by_country": by_country.most_common(),
+        "by_ip": by_ip.most_common(200),
+        "by_day": sorted(by_day.items()),
+        "feedback": feedback,
+        "recent": recent,
+    }
+
+_analytics_cache = {"ts": 0.0, "data": None}
+
+@app.get("/admin/analytics")
+async def admin_analytics(request: Request):
+    _require_internal(request)
+    return templates.TemplateResponse("analytics.html", {"request": request})
+
+@app.get("/admin/analytics_data")
+async def admin_analytics_data(request: Request):
+    _require_internal(request)
+    now = time.time()
+    if _analytics_cache["data"] is None or now - float(_analytics_cache["ts"] or 0.0) > 10:
+        _analytics_cache["data"] = _compute_analytics()
+        _analytics_cache["ts"] = now
+    return JSONResponse(content=_analytics_cache["data"])
 
 @app.post("/predict")
 async def predict(request: Request, image: Optional[UploadFile] = File(None), ecg: list[UploadFile] = File(None)):
