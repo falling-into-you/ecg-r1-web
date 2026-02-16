@@ -467,6 +467,7 @@ document.addEventListener('DOMContentLoaded', function() {
             let reasoningBuf = '';
             let answerBuf = '';
             let rawProcessedLen = 0;
+            let rawReasoningLen = 0;
             const streamState = { inThink: false, inAnswer: false, carry: '' };
             let sawAnswer = false;
             let answerPlaceholderShown = true;
@@ -692,13 +693,27 @@ document.addEventListener('DOMContentLoaded', function() {
                     let resp;
                     let data;
                     try {
-                        resp = await fetch(`/predict_progress/${requestId}`, { cache: 'no-store' });
+                        resp = await fetch(apiUrl(`/predict_progress/${requestId}`), { cache: 'no-store' });
                         data = await resp.json();
                         if (!resp.ok) throw new Error(data.detail || 'Polling failed');
                     } catch (e) {
                         continue;
                     }
 
+                    const fullReasoning = data.reasoning || '';
+                    if (fullReasoning.length > rawReasoningLen) {
+                        const delta = fullReasoning.slice(rawReasoningLen);
+                        rawReasoningLen = fullReasoning.length;
+                        if (placeholderShown) {
+                            reasoningBuf = '';
+                            pendingReasoning = '';
+                            reasoningText.textContent = '';
+                            placeholderShown = false;
+                        }
+                        pendingReasoning += delta;
+                        scheduleFlush();
+                        gotAnyChunk = true;
+                    }
                     const full = data.content || '';
                     if (full.length > rawProcessedLen) {
                         const delta = full.slice(rawProcessedLen);

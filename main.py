@@ -597,7 +597,208 @@ async def predict(request: Request, image: Optional[UploadFile] = File(None), ec
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+@app.post("/predict_start")
+async def predict_start(
+    request: Request,
+    image: Optional[UploadFile] = File(None),
+    ecg: list[UploadFile] = File(None),
+):
+    """
+    给微信小程序用的接口：
+    1. 校验 + 保存文件
+    2. 组装 InferRequest
+    3. 初始化 stream_states[request_id]
+    4. 启动后台线程做推理
+    5. 立刻返回 request_id
+    """
+    if engine is None:
+        raise HTTPException(status_code=500, detail="Model not loaded")
 
+    if not image and not ecg:
+        raise HTTPException(status_code=400, detail="Please provide at least one input (Image or ECG signal).")
+
+    from swift.llm import InferRequest, RequestConfig
+
+    date_str = _date_str()
+    request_id = _make_request_id(date_str)
+    request_dir = _make_request_dir(request_id, date_str)
+    client_ip = _client_ip(request)
+    client_geo = _client_geo(request)
+
+    images_list = []
+    objects_dict = {}
+    prompt_tags = ""
+    inputs: dict = {}
+
+    # ECG 处理（基本照抄你原来的逻辑）
+    if ecg:
+        dat_file = None
+        hea_file = None
+        for f in ecg:
+            fname = _safe_filename(f.filename)
+            ext = os.path.splitext(fname)[1].lower()
+            path = os.path.join(request_dir, fname)
+            with open(path, "wb") as fo:
+                shutil.copyfileobj(f.file, fo)
+
+            if ext == ".dat":
+                dat_file = path
+            elif ext == ".hea":
+                hea_file = path
+
+            if "ecg_files" not in inputs:
+                inputs["ecg_files"] = []
+            inputs["ecg_files"].append(fname)
+
+        if dat_file and hea_file:
+            base_hea = os.path.splitext(hea_file)[0]
+            record_path = base_hea
+            objects_dict["ecg"] = [record_path]
+            prompt_tags += "<ecg>"
+            inputs["ecg_record"] = os.path.basename(record_path)
+
+    # 图像处理（照抄你原来的逻辑）
+    if image and image.filename:
+        image_name = _safe_filename(image.filename)
+        image_path = os.path.join(request_dir, image_name)
+        with open(image_path, "wb") as f:
+            shutil.copyfileobj(image.file, f)
+        images_list.append(image_path)
+        prompt_tags += "<image>"
+        inputs["image"] = image_name
+
+    # prompt & InferRequest
+    prompt = (
+        f"{prompt_tags}Interpret the provided ECG image, identify key features and "
+        f"abnormalities in each lead, and generate a clinical diagnosis that is "
+        f"supported by the observed evidence."
+    )
+    infer_request = InferRequest(
+        messages=[{"role": "user", "content": prompt}],
+        images=images_list,
+        objects=objects_dict,
+    )
+    request_config = RequestConfig(
+        temperature=0.0,
+        max_tokens=2048,
+        top_p=0,
+        top_k=0,
+        repetition_penalty=1.0,
+        stream=True,  # 仍然可以用流式推理逻辑
+    )
+
+    # 初始化状态
+    stream_states[request_id] = {
+        "started_at": time.time(),
+        "request_dir": request_dir,
+        "date": date_str,
+        "client_ip": client_ip,
+        "content": "",
+        "reasoning": "",
+        "done": False,
+        "error": None,
+    }
+
+    # 启动后台推理
+    _start_background_infer(
+        request_id=request_id,
+        request_dir=request_dir,
+        date_str=date_str,
+        client_ip=client_ip,
+        client_geo=client_geo,
+        infer_request=infer_request,
+        request_config=request_config,
+        inputs=inputs,
+    )
+
+    # 立刻返回 request_id，前端拿这个去轮询 /predict_progress/{request_id}
+    return {"request_id": request_id}
+def _start_background_infer(request_id: str,
+                            request_dir: str,
+                            date_str: str,
+                            client_ip: str,
+                            client_geo: dict,
+                            infer_request,
+                            request_config,
+                            inputs: dict):
+    """
+    启动一个后台线程做推理，把结果累计写入 stream_states[request_id]，
+    完成后写 data.json，并把 done / error 状态更新好。
+    """
+    def _run():
+        content_buf = ""
+        reasoning_buf = ""
+        try:
+            resp_list = engine.infer([infer_request], request_config)
+            item = resp_list[0] if resp_list else None
+
+            if item is not None and hasattr(item, "__iter__") and not hasattr(item, "choices"):
+                # 流式输出
+                for chunk in item:
+                    for choice in getattr(chunk, "choices", []) or []:
+                        delta = getattr(choice, "delta", None)
+                        if delta is None:
+                            continue
+                        rc = getattr(delta, "reasoning_content", None)
+                        if rc:
+                            stream_states[request_id]["reasoning"] += rc
+                            reasoning_buf += rc
+                        c = getattr(delta, "content", None)
+                            # 注意缩进保持一致
+                        if c:
+                            stream_states[request_id]["content"] += c
+                            content_buf += c
+            else:
+                # 一次性输出，手动切块
+                result_text = getattr(
+                    getattr(getattr(item, "choices", [None])[0], "message", None),
+                    "content",
+                    ""
+                ) if item is not None else ""
+                if result_text:
+                    chunk_size = 64
+                    for i in range(0, len(result_text), chunk_size):
+                        chunk = result_text[i:i + chunk_size]
+                        stream_states[request_id]["content"] += chunk
+                        content_buf += chunk
+
+            collected_info = {
+                "request_id": request_id,
+                "timestamp": datetime.datetime.now().isoformat(),
+                "date": date_str,
+                "inputs": inputs,
+                "model_output": content_buf,
+                "reasoning_output": reasoning_buf,
+                "client": {
+                    "ip": client_ip,
+                    "geo": client_geo,
+                    "user_agent": None,
+                },
+                "meta_info": {
+                    "model_path": config.MODEL_PATH,
+                    "model_display_name": config.MODEL_DISPLAY_NAME,
+                    "ecg_tower_path": config.ECG_TOWER_PATH,
+                    "request_config": {
+                        "temperature": request_config.temperature,
+                        "max_tokens": request_config.max_tokens,
+                        "top_p": request_config.top_p,
+                        "top_k": request_config.top_k,
+                        "repetition_penalty": request_config.repetition_penalty,
+                        "stream": request_config.stream,
+                    },
+                },
+                "feedback": None,
+            }
+
+            with open(os.path.join(request_dir, "data.json"), "w") as f:
+                json.dump(collected_info, f, indent=4, ensure_ascii=False)
+
+            stream_states[request_id]["done"] = True
+        except Exception as e:
+            stream_states[request_id]["error"] = str(e)
+            stream_states[request_id]["done"] = True
+
+    threading.Thread(target=_run, daemon=True).start()
 @app.post("/predict_stream")
 async def predict_stream(request: Request, image: Optional[UploadFile] = File(None), ecg: list[UploadFile] = File(None)):
     if engine is None:
@@ -711,6 +912,7 @@ async def predict_stream(request: Request, image: Optional[UploadFile] = File(No
                 q.put(("done", request_id))
             except Exception as e:
                 stream_states[request_id]["error"] = str(e)
+                stream_states[request_id]["done"] = True
                 q.put(("error", str(e)))
 
         thread = threading.Thread(target=_run_infer, daemon=True)
@@ -775,6 +977,7 @@ async def predict_stream(request: Request, image: Optional[UploadFile] = File(No
             yield f"event: done\ndata: {json.dumps({'request_id': request_id}, ensure_ascii=False)}\n\n"
         except Exception as e:
             stream_states[request_id]["error"] = str(e)
+            stream_states[request_id]["done"] = True
             yield f"event: error\ndata: {json.dumps({'detail': str(e)}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(

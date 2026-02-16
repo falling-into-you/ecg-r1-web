@@ -17,6 +17,17 @@
 - 避免浏览器直接跨域访问显卡服务器（减少 CORS 复杂度）
 - 显卡服务器 44000 可限制为“仅允许前端服务器访问”，防止伪造 `X-Forwarded-For` 等头污染统计
 
+## 1.1 三步跑通（推荐：前端服务器反代到 GPU:44000）
+
+1) 前端服务器托管页面静态资源（index.html / static/*）。
+2) 前端页面把 API 前缀改成同域路径：
+   - `<meta name="ecg-api-base" content="/ecg_api">`
+3) 前端服务器把 `/ecg_api/*` 反代到显卡服务器 `http://<gpu-server-ip>:44000/*`（Nginx 示例见第 4 节）。
+
+最终效果（很关键）：
+- 浏览器只请求前端服务器：`https://<frontend-domain>/ecg_api/predict_stream`
+- 前端服务器再转发到显卡服务器：`http://<gpu-server-ip>:44000/predict_stream`
+
 ## 2. 复用哪些前端文件
 
 直接复用以下资源即可：
@@ -47,6 +58,8 @@
 - `POST /ecg_api/predict_stream`
 - `POST /ecg_api/predict`
 - `POST /ecg_api/feedback`
+
+注意：这里不写 GPU 服务器 IP/端口。GPU 的 `ip:44000` 写在“前端服务器反代配置”里（第 4 节）。
 
 ### 3.2 不推荐：浏览器直连显卡服务器（需要 CORS）
 ```html

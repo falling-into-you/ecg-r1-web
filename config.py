@@ -5,10 +5,10 @@ ECG_R1_ROOT = "/data/jinjiarui/run/ecg-r1"
 # Hardcoded absolute path as requested to avoid any relative path issues
 ECG_TOWER_PATH = "/data/jinjiarui/run/ecg-r1/ecg_coca/checkpoint/cpt_wfep_epoch_20.pt"
 # NOTE: Verify this path exists. If not, update it to the correct checkpoint path.
-MODEL_PATH = "/data/jinjiarui/run/ecg-r1/training/ecg-r1-8b-dapo/v16-20251227-163009/checkpoint-493"
-MODEL_DISPLAY_NAME = "ECG-R1-8B-0131"
+MODEL_PATH = "/data/jinjiarui/run/ecg-r1/training/ecg-r1-8b-dapo/v26-20260204-231003/checkpoint-493"
+MODEL_DISPLAY_NAME = "ECG-R1-8B-0202"
 # CUDA Configuration
-CUDA_DEVICE = "0"
+CUDA_DEVICE = "1"
 
 # Environment variables required by the model
 ENV_VARS = {
