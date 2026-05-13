@@ -718,6 +718,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (full.length > rawProcessedLen) {
                         const delta = full.slice(rawProcessedLen);
                         rawProcessedLen = full.length;
+                        if (placeholderShown) {
+                            reasoningBuf = '';
+                            pendingReasoning = '';
+                            reasoningText.textContent = '';
+                            placeholderShown = false;
+                        }
                         routeContentChunk(delta);
                         gotAnyChunk = true;
                     }
