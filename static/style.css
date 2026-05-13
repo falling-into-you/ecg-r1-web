@@ -175,14 +175,6 @@ body {
     color: var(--text-muted);
 }
 
-.requirements-example-notes {
-    margin: 0.65rem 0 0;
-    padding-left: 1.1rem;
-    color: var(--text-muted);
-    font-size: 0.85rem;
-    line-height: 1.5;
-}
-
 #inferenceForm {
     padding: 1.5rem;
     display: flex;
