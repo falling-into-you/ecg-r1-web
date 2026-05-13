@@ -11,13 +11,15 @@
 
 ## 运行方式
 ### FastAPI
-- 启动：`uvicorn main:app --host 0.0.0.0 --port 8000 --log-level info`
-- 页面：`http://localhost:8000`
+- 配置：修改仓库内 `config.py`
+- 启动 Web：`bash scripts/serve_web.sh`
+- 启动直接 vLLM 推理：`bash scripts/serve_vllm.sh`
+- 页面：`http://127.0.0.1:8000` 或 `http://<server-ip>:8000`
 
 ### tmux（推荐线上常驻）
-- 新建会话：`tmux new -s ecg_r1_web`
-- 在会话内启动 uvicorn（同上）
-- 退出但保持后台：`Ctrl-b d`
+- vLLM：`tmux new -d -s ecg-r1-rollout 'cd /data/jinjiarui/run/ecg-r1-web && bash scripts/serve_vllm.sh'`
+- Web：`tmux new -d -s ecg-r1-web 'cd /data/jinjiarui/run/ecg-r1-web && bash scripts/serve_web.sh'`
+- 查看日志：`tmux capture-pane -t ecg-r1-web -p -S -80`
 
 ## Nginx 部署（域名代理到 8000）
 DNS 解析无法直接携带端口；做法是让域名解析到服务器 IP，然后用 Nginx 在 80/443 端口反向代理到 `127.0.0.1:8000`。
@@ -79,9 +81,10 @@ Ubuntu 22.04 示例（需要 sudo 权限）：
     - 后端会自动匹配 `.dat` 与 `.hea`，传递 Record Name 给推理引擎。
   - **ECG Image**：限制仅接受 `.png`, `.jpg`, `.jpeg`。
 - 流式推理：前端优先使用 SSE（`/predict_stream`）
-- 推理后端已拆成 provider：`mock` 可独立启动 Web，`swift_rollout` 连接独立 Swift/vLLM 服务。
+- 推理后端已拆成 provider：`mock` 可独立启动 Web，`vllm_direct` 连接独立直接 vLLM 服务；`swift_rollout` 仅保留为旧兼容 provider。
+- 直接 vLLM 服务使用 `AsyncLLMEngine` 推理，不走 Swift GRPO rollout；`/predict_stream` 可接收真实生成增量。
 - Web 进程不再通过 `ECG_R1_ROOT` 加载 ECG-R1 源码，也不在 FastAPI 启动时加载模型。
-- 本仓库包含 `ecg_r1_runtime/` 与最小 `ecg_coca/` 运行时代码；模型权重和 ECG tower checkpoint 通过环境变量指定。
+- 本仓库包含 `ecg_r1_runtime/` 与最小 `ecg_coca/` 运行时代码；模型权重和 ECG tower checkpoint 通过仓库内 `config.py` 指定。
 - 兼容 IDE WebView/代理缓冲：SSE 无增量时自动切换轮询 `/predict_progress/{request_id}`
 - 推理结果分区：
   - **Reasoning Process**：`<think>...</think>` 内容。
@@ -121,12 +124,14 @@ Ubuntu 22.04 示例（需要 sudo 权限）：
 ### 稳定性与性能
 - 轮询接口增加过期清理：避免 `stream_states` 长期增长
 - 并发控制：限制同一时间推理数量（队列/限流）
-- 更优的真正 token-level streaming（如果 swift 支持稳定 delta）
+- 推理并发和长请求调度：直接 vLLM 已支持增量输出，后续需要补队列/限流。
 
 ### 可靠性与测试
 - 增加前端 E2E/最小回归脚本（至少覆盖：上传、开始、看到增量、done、Request ID）
 - 增加后端健康检查与 GPU/模型加载状态页（当前已有 /status，后续可扩展）
 
 ## 版本记录（手动维护）
+- 2026-05-13：推理服务从 Swift GRPO rollout 切换为直接 vLLM `AsyncLLMEngine`；新增 `vllm_direct` provider 和 `scripts/serve_vllm.sh`，支持真实流式增量输出
+- 2026-05-13：将启动配置收敛到仓库内 `config.py`；启动脚本不再读取外部 shell 环境变量作为配置来源，并按配置激活 conda 环境
 - 2026-05-13：重构推理边界；新增 provider 架构、Swift rollout 适配、本仓库内 ECG-R1 vLLM runtime 代码、独立 Web/rollout 启动脚本
 - 2026-01-31：第一版可用端到端 Demo；支持流式 + 轮询降级；UI 逐步完善

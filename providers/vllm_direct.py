@@ -6,15 +6,15 @@ import urllib.error
 import urllib.request
 from typing import Any, Iterable, Mapping
 
-from .base import InferenceChunk, InferenceRequest, InferenceResult, chunk_text
+from .base import InferenceChunk, InferenceRequest, InferenceResult
 
 
-class SwiftRolloutProvider:
-    name = "swift_rollout"
+class VLLMDirectProvider:
+    name = "vllm_direct"
 
-    def __init__(self, infer_url: str, health_url: str | None = None, timeout_s: float = 300.0):
+    def __init__(self, infer_url: str, health_url: str, timeout_s: float = 300.0):
         self.infer_url = infer_url
-        self.health_url = health_url or infer_url.rstrip("/").rsplit("/", 1)[0] + "/health/"
+        self.health_url = health_url
         self.timeout_s = timeout_s
         self._last_online_at: float | None = None
         self._last_health_body = ""
@@ -28,7 +28,7 @@ class SwiftRolloutProvider:
             self._last_health_body = body[:300]
             return {
                 "status": "online",
-                "detail": f"Swift rollout service returned health status {resp.status}",
+                "detail": f"Direct vLLM service returned health status {resp.status}",
                 "provider": self.name,
                 "infer_url": self.infer_url,
                 "health_url": self.health_url,
@@ -40,7 +40,7 @@ class SwiftRolloutProvider:
                 if age_s < 120:
                     return {
                         "status": "loading",
-                        "detail": f"Swift rollout health check failed after a recent success ({age_s:.1f}s ago): {exc}",
+                        "detail": f"Direct vLLM health check failed after a recent success ({age_s:.1f}s ago): {exc}",
                         "provider": self.name,
                         "infer_url": self.infer_url,
                         "health_url": self.health_url,
@@ -55,14 +55,42 @@ class SwiftRolloutProvider:
             }
 
     def infer(self, request: InferenceRequest) -> InferenceResult:
-        payload = {
+        payload = self._payload(request, stream=False)
+        raw = self._post_json(payload)
+        return InferenceResult(content=self._extract_text(raw), raw=raw)
+
+    def stream(self, request: InferenceRequest) -> Iterable[InferenceChunk]:
+        payload = self._payload(request, stream=True)
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        req = urllib.request.Request(
+            self.infer_url,
+            data=body,
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "text/event-stream",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:
+                yield from self._iter_sse(resp)
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="ignore")
+            raise RuntimeError(f"direct vLLM error {exc.code}: {detail[:1000]}") from exc
+
+    def _payload(self, request: InferenceRequest, stream: bool) -> dict[str, Any]:
+        request_config = dict(request.request_config)
+        request_config["stream"] = stream
+        return {
             "infer_requests": [{
                 "messages": request.messages,
                 "images": request.images,
                 "objects": request.objects,
             }],
-            "request_config": request.request_config,
+            "request_config": request_config,
         }
+
+    def _post_json(self, payload: dict[str, Any]) -> Any:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         req = urllib.request.Request(
             self.infer_url,
@@ -75,28 +103,41 @@ class SwiftRolloutProvider:
                 raw_text = resp.read().decode("utf-8", errors="ignore")
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="ignore")
-            raise RuntimeError(f"swift rollout error {exc.code}: {detail[:1000]}") from exc
+            raise RuntimeError(f"direct vLLM error {exc.code}: {detail[:1000]}") from exc
 
         try:
-            raw = json.loads(raw_text)
+            return json.loads(raw_text)
         except json.JSONDecodeError:
-            raw = raw_text
-        return InferenceResult(content=self._extract_text(raw), raw=raw)
+            return raw_text
 
-    def stream(self, request: InferenceRequest) -> Iterable[InferenceChunk]:
-        request_config = dict(request.request_config)
-        request_config["stream"] = False
-        result = self.infer(InferenceRequest(
-            messages=request.messages,
-            images=request.images,
-            objects=request.objects,
-            request_config=request_config,
-        ))
-        if result.reasoning:
-            for text in chunk_text(result.reasoning):
-                yield InferenceChunk(event="reasoning", text=text)
-        for text in chunk_text(result.content):
-            yield InferenceChunk(event="content", text=text)
+    def _iter_sse(self, resp) -> Iterable[InferenceChunk]:
+        event = "message"
+        data_lines: list[str] = []
+
+        for raw_line in resp:
+            line = raw_line.decode("utf-8", errors="ignore").rstrip("\r\n")
+            if not line:
+                if data_lines:
+                    payload = "\n".join(data_lines)
+                    try:
+                        value = json.loads(payload)
+                    except json.JSONDecodeError:
+                        value = payload
+                    if event == "content":
+                        yield InferenceChunk(event="content", text=str(value))
+                    elif event == "reasoning":
+                        yield InferenceChunk(event="reasoning", text=str(value))
+                    elif event == "error":
+                        if isinstance(value, dict):
+                            raise RuntimeError(str(value.get("detail") or value))
+                        raise RuntimeError(str(value))
+                event = "message"
+                data_lines = []
+                continue
+            if line.startswith("event:"):
+                event = line[6:].strip()
+            elif line.startswith("data:"):
+                data_lines.append(line[5:].strip())
 
     def _extract_text(self, raw: Any) -> str:
         if isinstance(raw, list) and raw:

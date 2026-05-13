@@ -336,7 +336,7 @@ async def admin_whoami(request: Request):
 def _default_request_config(stream: bool = False) -> dict:
     return {
         "temperature": 0.0,
-        "max_tokens": 2048,
+        "max_tokens": config.DEFAULT_MAX_TOKENS,
         "top_p": 1.0,
         "top_k": 0,
         "repetition_penalty": 1.0,
@@ -350,6 +350,12 @@ def _build_prompt(prompt_tags: str) -> str:
         "is supported by the observed evidence."
     )
 
+def _has_upload(uploaded: Optional[UploadFile]) -> bool:
+    return bool(uploaded and uploaded.filename)
+
+def _uploaded_files(files: Optional[list[UploadFile]]) -> list[UploadFile]:
+    return [uploaded for uploaded in files or [] if _has_upload(uploaded)]
+
 def _prepare_provider_request(
     image: Optional[UploadFile],
     ecg: Optional[list[UploadFile]],
@@ -360,11 +366,12 @@ def _prepare_provider_request(
     objects_dict = {}
     prompt_tags = ""
     inputs: dict = {}
+    ecg_files = _uploaded_files(ecg)
 
-    if ecg:
+    if ecg_files:
         dat_file = None
         hea_file = None
-        for uploaded in ecg:
+        for uploaded in ecg_files:
             fname = _safe_filename(uploaded.filename)
             ext = os.path.splitext(fname)[1].lower()
             path = os.path.join(request_dir, fname)
@@ -385,7 +392,7 @@ def _prepare_provider_request(
         prompt_tags += "<ecg>"
         inputs["ecg_record"] = os.path.basename(record_path)
 
-    if image and image.filename:
+    if _has_upload(image):
         image_name = _safe_filename(image.filename)
         image_path = os.path.join(request_dir, image_name)
         with open(image_path, "wb") as f:
@@ -450,7 +457,7 @@ async def _predict_once_provider(
     image: Optional[UploadFile],
     ecg: Optional[list[UploadFile]],
 ):
-    if not image and not ecg:
+    if not _has_upload(image) and not _uploaded_files(ecg):
         raise HTTPException(status_code=400, detail="Please provide at least one input (Image or ECG signal).")
 
     date_str = _date_str()
@@ -523,7 +530,7 @@ async def _predict_start_provider(
     image: Optional[UploadFile],
     ecg: Optional[list[UploadFile]],
 ):
-    if not image and not ecg:
+    if not _has_upload(image) and not _uploaded_files(ecg):
         raise HTTPException(status_code=400, detail="Please provide at least one input (Image or ECG signal).")
 
     date_str = _date_str()
@@ -560,7 +567,7 @@ async def _predict_stream_provider(
     image: Optional[UploadFile],
     ecg: Optional[list[UploadFile]],
 ):
-    if not image and not ecg:
+    if not _has_upload(image) and not _uploaded_files(ecg):
         raise HTTPException(status_code=400, detail="Please provide at least one input (Image or ECG signal).")
 
     date_str = _date_str()

@@ -13,41 +13,46 @@ This is a web frontend for the ECG-R1 multimodal model, providing an interface f
     pip install -r requirements.txt
     pip install -e .
     ```
-2.  For vLLM rollout, install runtime extras in the serving environment if needed:
+2.  For direct vLLM inference, install runtime extras in the serving environment if needed:
     ```bash
     pip install -e ".[runtime]"
     ```
 
 ## Running the Application
 
-Start the FastAPI server with the mock provider:
+Edit `config.py` for project-local settings such as `INFERENCE_BACKEND`,
+`MODEL_PATH`, `ECG_TOWER_PATH`, `WEB_PORT`, `VLLM_PORT`, and the
+startup conda environment.
+
+Start the FastAPI server with the mock provider by setting
+`INFERENCE_BACKEND = "mock"` in `config.py`:
 
 ```bash
-INFERENCE_BACKEND=mock uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+bash scripts/serve_web.sh
 ```
 
-Access the web interface at `http://localhost:8000`.
+Access the web interface at `http://127.0.0.1:8000` locally or
+`http://<server-ip>:8000` from another machine.
 
-Run with a separate Swift rollout service:
+Run with a separate direct vLLM service by setting
+`INFERENCE_BACKEND = "vllm_direct"` in `config.py`:
 
 ```bash
-MODEL_PATH=/path/to/ecg-r1-checkpoint \
-ECG_TOWER_PATH=/path/to/cpt_wfep_epoch_20.pt \
-bash scripts/serve_rollout.sh
+bash scripts/serve_vllm.sh
 
-INFERENCE_BACKEND=swift_rollout bash scripts/serve_web.sh
+bash scripts/serve_web.sh
 ```
 
 ## tmux (recommended)
-Run in a persistent tmux session:
+Run the vLLM and web services in persistent tmux sessions:
 
 ```bash
-tmux new -s ecg_r1_web
-cd /data/jinjiarui/run/ecg-r1-web
-source /home/jinjiarui/miniconda3/bin/activate swift2
-bash scripts/serve_web.sh
+tmux new -d -s ecg-r1-rollout 'cd /data/jinjiarui/run/ecg-r1-web && bash scripts/serve_vllm.sh'
+tmux new -d -s ecg-r1-web 'cd /data/jinjiarui/run/ecg-r1-web && bash scripts/serve_web.sh'
 ```
 
 ## Configuration
 
-Use environment variables for deployment-specific values: `INFERENCE_BACKEND`, `SWIFT_ROLLOUT_URL`, `MODEL_PATH`, `ECG_TOWER_PATH`, and `DATA_COLLECTION_DIR`.
+Use `config.py` for deployment-specific values. Startup scripts export a small
+process-local environment only because vLLM runtime code reads those keys;
+the values still come from this repository's `config.py`.

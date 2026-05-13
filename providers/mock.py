@@ -24,8 +24,8 @@ class MockProvider:
         label = " + ".join(modalities) if modalities else "text"
         content = (
             f"<think>Mock provider received {label} input.</think>\n"
-            "<answer>This is a mock ECG-R1 response. Start a real rollout service "
-            "and set INFERENCE_BACKEND=swift_rollout for model inference.</answer>"
+            "<answer>This is a mock ECG-R1 response. Start the direct vLLM service "
+            "and set INFERENCE_BACKEND=vllm_direct for model inference.</answer>"
         )
         return InferenceResult(content=content, raw={"provider": self.name})
 

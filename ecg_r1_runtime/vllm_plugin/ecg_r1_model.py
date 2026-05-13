@@ -130,10 +130,11 @@ class ECGR1ForConditionalGeneration(Qwen3VLForConditionalGeneration):
 
     def _init_ecg_components(self, config):
         """初始化 ECG tower 和 projector"""
-        # 从环境变量或 config 获取路径
-        ecg_tower_path = getattr(config, 'ecg_tower_path', None) or os.environ.get('ECG_TOWER_PATH')
-        ecg_projector_type = getattr(config, 'ecg_projector_type', None) or os.environ.get('ECG_PROJECTOR_TYPE', 'mlp2x_gelu')
-        ecg_model_config = getattr(config, 'ecg_model_config', None) or os.environ.get('ECG_MODEL_CONFIG', 'coca_ViT-B-32')
+        # Serving config comes from this repository's startup scripts. Prefer it
+        # over checkpoint metadata, which may contain paths from the training tree.
+        ecg_tower_path = os.environ.get('ECG_TOWER_PATH') or getattr(config, 'ecg_tower_path', None)
+        ecg_projector_type = os.environ.get('ECG_PROJECTOR_TYPE') or getattr(config, 'ecg_projector_type', 'mlp2x_gelu')
+        ecg_model_config = os.environ.get('ECG_MODEL_CONFIG') or getattr(config, 'ecg_model_config', 'coca_ViT-B-32')
         
         # 获取 LLM hidden size
         llm_hidden_size = getattr(config, 'hidden_size', None)
@@ -625,4 +626,3 @@ if __name__ == '__main__':
    1. 启动 swift rollout 测试实际推理
    2. 启动 swift rlhf 测试权重同步
 """)
-

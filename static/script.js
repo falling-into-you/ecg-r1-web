@@ -801,7 +801,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         } else if (eventType === 'ping') {
                             if (placeholderShown) {
                                 const sec = Math.floor((Date.now() - startedAt) / 1000);
-                                reasoningText.textContent = `Generating... (${sec}s)`;
+                                reasoningText.textContent = `Waiting for first token... (${sec}s).`;
                             }
                         } else if (eventType === 'done') {
                             if (payload && payload.request_id) currentRequestId = payload.request_id;

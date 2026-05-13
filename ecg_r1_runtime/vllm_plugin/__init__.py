@@ -5,7 +5,7 @@ ECG-R1 vLLM 插件
 
 使用方式：
 1. 在本仓库执行 `pip install -e .`，注册 pyproject.toml 中的 vLLM entry point。
-2. 启动 `scripts/serve_rollout.sh`。
+2. 启动 `scripts/serve_vllm.sh`。
 3. vLLM 启动时会自动加载插件。
 """
 

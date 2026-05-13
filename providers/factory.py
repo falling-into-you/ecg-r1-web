@@ -4,6 +4,7 @@ import config
 
 from .mock import MockProvider
 from .swift_rollout import SwiftRolloutProvider
+from .vllm_direct import VLLMDirectProvider
 
 
 def get_provider():
@@ -14,6 +15,12 @@ def get_provider():
         return SwiftRolloutProvider(
             infer_url=config.SWIFT_ROLLOUT_URL,
             health_url=config.SWIFT_ROLLOUT_HEALTH_URL,
+            timeout_s=config.INFERENCE_TIMEOUT_S,
+        )
+    if backend == "vllm_direct":
+        return VLLMDirectProvider(
+            infer_url=config.VLLM_URL,
+            health_url=config.VLLM_HEALTH_URL,
             timeout_s=config.INFERENCE_TIMEOUT_S,
         )
     raise ValueError(f"Unsupported INFERENCE_BACKEND={backend!r}")
