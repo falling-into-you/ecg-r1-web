@@ -8,21 +8,35 @@ This is a web frontend for the ECG-R1 multimodal model, providing an interface f
 
 ## Setup
 
-1.  Ensure you have access to the `ecg-r1` model and code in `/data/jinjiarui/run/ecg-r1`.
-2.  Install dependencies:
+1.  Install dependencies:
     ```bash
     pip install -r requirements.txt
+    pip install -e .
+    ```
+2.  For vLLM rollout, install runtime extras in the serving environment if needed:
+    ```bash
+    pip install -e ".[runtime]"
     ```
 
 ## Running the Application
 
-Start the FastAPI server:
+Start the FastAPI server with the mock provider:
 
 ```bash
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+INFERENCE_BACKEND=mock uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 Access the web interface at `http://localhost:8000`.
+
+Run with a separate Swift rollout service:
+
+```bash
+MODEL_PATH=/path/to/ecg-r1-checkpoint \
+ECG_TOWER_PATH=/path/to/cpt_wfep_epoch_20.pt \
+bash scripts/serve_rollout.sh
+
+INFERENCE_BACKEND=swift_rollout bash scripts/serve_web.sh
+```
 
 ## tmux (recommended)
 Run in a persistent tmux session:
@@ -31,9 +45,9 @@ Run in a persistent tmux session:
 tmux new -s ecg_r1_web
 cd /data/jinjiarui/run/ecg-r1-web
 source /home/jinjiarui/miniconda3/bin/activate swift2
-uvicorn main:app --host 0.0.0.0 --port 8000 --log-level info
+bash scripts/serve_web.sh
 ```
 
 ## Configuration
 
-Modify `config.py` to adjust model paths and environment variables.
+Use environment variables for deployment-specific values: `INFERENCE_BACKEND`, `SWIFT_ROLLOUT_URL`, `MODEL_PATH`, `ECG_TOWER_PATH`, and `DATA_COLLECTION_DIR`.

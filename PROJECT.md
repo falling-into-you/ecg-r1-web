@@ -79,6 +79,9 @@ Ubuntu 22.04 示例（需要 sudo 权限）：
     - 后端会自动匹配 `.dat` 与 `.hea`，传递 Record Name 给推理引擎。
   - **ECG Image**：限制仅接受 `.png`, `.jpg`, `.jpeg`。
 - 流式推理：前端优先使用 SSE（`/predict_stream`）
+- 推理后端已拆成 provider：`mock` 可独立启动 Web，`swift_rollout` 连接独立 Swift/vLLM 服务。
+- Web 进程不再通过 `ECG_R1_ROOT` 加载 ECG-R1 源码，也不在 FastAPI 启动时加载模型。
+- 本仓库包含 `ecg_r1_runtime/` 与最小 `ecg_coca/` 运行时代码；模型权重和 ECG tower checkpoint 通过环境变量指定。
 - 兼容 IDE WebView/代理缓冲：SSE 无增量时自动切换轮询 `/predict_progress/{request_id}`
 - 推理结果分区：
   - **Reasoning Process**：`<think>...</think>` 内容。
@@ -125,4 +128,5 @@ Ubuntu 22.04 示例（需要 sudo 权限）：
 - 增加后端健康检查与 GPU/模型加载状态页（当前已有 /status，后续可扩展）
 
 ## 版本记录（手动维护）
+- 2026-05-13：重构推理边界；新增 provider 架构、Swift rollout 适配、本仓库内 ECG-R1 vLLM runtime 代码、独立 Web/rollout 启动脚本
 - 2026-01-31：第一版可用端到端 Demo；支持流式 + 轮询降级；UI 逐步完善

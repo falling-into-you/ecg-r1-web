@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ecg-r1-web"
+version = "0.1.0"
+description = "Standalone ECG-R1 web frontend and inference runtime adapters"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "python-multipart",
+    "jinja2",
+    "torch",
+    "transformers",
+]
+
+[project.optional-dependencies]
+runtime = [
+    "ftfy",
+    "regex",
+    "scipy",
+    "timm",
+    "torchvision",
+    "wfdb",
+    "vllm",
+]
+
+[project.entry-points."vllm.general_plugins"]
+ecg_r1 = "ecg_r1_runtime.vllm_plugin:register"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["providers*", "ecg_r1_runtime*", "ecg_coca*"]
+
+[tool.setuptools.package-data]
+"ecg_coca.open_clip" = ["bpe_simple_vocab_16e6.txt.gz", "model_configs/*.json"]

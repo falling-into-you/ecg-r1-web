@@ -6,3 +6,4 @@ venv/
 uploads/
 collected_data/
 data_collection
+checkpoints/

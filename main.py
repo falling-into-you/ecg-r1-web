@@ -2,15 +2,10 @@ import sys
 import os
 import config
 from config import DATA_COLLECTION_DIR
-sys.path.insert(0, config.ECG_R1_ROOT)
-for k, v in config.ENV_VARS.items():
-    os.environ[k] = v
 
 import shutil
-import importlib.util
 import asyncio
 import queue
-import torch
 import threading
 import datetime
 import uuid
@@ -18,7 +13,6 @@ import time
 import ipaddress
 import urllib.request
 import urllib.parse
-from contextlib import asynccontextmanager
 
 # Force flush stdout
 sys.stdout.reconfigure(line_buffering=True)
@@ -31,16 +25,10 @@ from fastapi.requests import Request
 from fastapi.middleware.cors import CORSMiddleware
 import json
 from collections import Counter, defaultdict
+from providers import get_provider
+from providers.base import InferenceRequest
 
-# Global engine variable
-engine = None
-processor = None
-template = None
-_cuda_probe_tensor = None
-
-# Loading state
-loading_logs = []
-model_loading_status = "pending" # pending, loading, success, failed
+inference_provider = get_provider()
 stream_states = {}
 
 def _peer_ip(request: Request) -> str:
@@ -186,115 +174,7 @@ def _make_request_dir(request_id: str, date_str: str) -> str:
     os.makedirs(request_dir, exist_ok=True)
     return request_dir
 
-def add_log(msg):
-    timestamp = datetime.datetime.now().strftime("%H:%M:%S")
-    log_entry = f"[{timestamp}] {msg}"
-    loading_logs.append(log_entry)
-    print(log_entry)
-
-def load_custom_register():
-    # Load LOCAL my_register_v3.py
-    register_path = os.path.join(os.getcwd(), "my_register_v3.py")
-    if not os.path.exists(register_path):
-        add_log(f"Warning: Register file not found at {register_path}")
-        return
-        
-    spec = importlib.util.spec_from_file_location("my_register", register_path)
-    my_register = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(my_register)
-    add_log("Custom register loaded (local version).")
-
-def load_model_background():
-    global engine, processor, template, model_loading_status
-    model_loading_status = "loading"
-    add_log("Initializing system...")
-    
-    try:
-        # Setup env vars
-        for k, v in config.ENV_VARS.items():
-            os.environ[k] = v
-        
-        add_log(f"DEBUG: ECG_TOWER_PATH={os.environ.get('ECG_TOWER_PATH')}")
-        add_log(f"DEBUG: ROOT_ECG_DIR={os.environ.get('ROOT_ECG_DIR')}")
-        add_log(f"Environment variables set. CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES')}")
-        add_log(f"PID={os.getpid()}")
-        add_log(f"torch.version.cuda={getattr(torch.version, 'cuda', None)}")
-        add_log(f"torch.cuda.is_available={torch.cuda.is_available()}")
-        add_log(f"torch.cuda.device_count={torch.cuda.device_count()}")
-        if torch.cuda.is_available():
-            try:
-                current_idx = torch.cuda.current_device()
-                add_log(f"torch.cuda.current_device={current_idx}")
-                add_log(f"torch.cuda.get_device_name={torch.cuda.get_device_name(current_idx)}")
-            except Exception as e:
-                add_log(f"CUDA device query failed: {e}")
-            global _cuda_probe_tensor
-            try:
-                _cuda_probe_tensor = torch.empty(1, device="cuda")
-                add_log("CUDA probe allocation ok")
-            except Exception as e:
-                add_log(f"CUDA probe allocation failed: {e}")
-
-        add_log("Importing swift modules...")
-        # Import swift modules here to ensure env vars are set
-        from swift.llm import PtEngine, get_model_tokenizer, get_template
-        add_log("Swift modules imported.")
-        
-        load_custom_register()
-        
-        # Check if model path exists
-        if not os.path.exists(config.MODEL_PATH):
-            add_log(f"Error: Model path {config.MODEL_PATH} does not exist.")
-            model_loading_status = "failed"
-            return
-        
-        add_log(f"Loading model from {config.MODEL_PATH} with bfloat16...")
-        model, processor = get_model_tokenizer(
-            config.MODEL_PATH, 
-            model_type='ecg_r1', 
-            torch_dtype=torch.bfloat16
-        )
-        add_log("Model and tokenizer loaded into memory.")
-        try:
-            hf_device_map = getattr(model, "hf_device_map", None)
-            if hf_device_map is not None:
-                add_log(f"hf_device_map={hf_device_map}")
-            first_param = next(model.parameters(), None)
-            if first_param is not None:
-                add_log(f"first_param_device={first_param.device}")
-        except Exception as e:
-            add_log(f"Model device inspection failed: {e}")
-        
-        template = get_template('ecg_r1', processor)
-        engine = PtEngine.from_model_template(model, template, max_batch_size=1)
-        add_log("Inference engine initialized. System Ready.")
-        if torch.cuda.is_available():
-            try:
-                allocated = torch.cuda.memory_allocated() / (1024 ** 2)
-                reserved = torch.cuda.memory_reserved() / (1024 ** 2)
-                add_log(f"cuda.memory_allocated_mib={allocated:.1f}")
-                add_log(f"cuda.memory_reserved_mib={reserved:.1f}")
-            except Exception as e:
-                add_log(f"CUDA memory stats failed: {e}")
-        
-        model_loading_status = "success"
-        
-    except Exception as e:
-        import traceback
-        err = traceback.format_exc()
-        add_log(f"Critical Error: {str(e)}")
-        add_log(err)
-        model_loading_status = "failed"
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Start loading in background thread
-    thread = threading.Thread(target=load_model_background)
-    thread.start()
-    yield
-    print("Shutting down...")
-
-app = FastAPI(lifespan=lifespan)
+app = FastAPI()
 
 # Add CORS middleware to allow requests from other servers
 app.add_middleware(
@@ -312,24 +192,21 @@ templates = Jinja2Templates(directory="templates")
 
 @app.get("/")
 async def read_root(request: Request):
-    if model_loading_status == "success":
-        return templates.TemplateResponse("index.html", {"request": request, "model_display_name": config.MODEL_DISPLAY_NAME})
-    else:
-        return templates.TemplateResponse("loading.html", {"request": request})
+    return templates.TemplateResponse("index.html", {"request": request, "model_display_name": config.MODEL_DISPLAY_NAME})
 
 @app.get("/startup-logs")
 async def get_startup_logs():
-    return {"status": model_loading_status, "logs": loading_logs}
+    return {
+        "status": "ready",
+        "logs": [
+            f"Web server ready. INFERENCE_BACKEND={config.INFERENCE_BACKEND}",
+            "Model loading is handled by the selected inference provider.",
+        ],
+    }
 
 @app.get("/status")
 async def get_status():
-    if model_loading_status in ("pending", "loading"):
-        return JSONResponse(content={"status": "loading", "detail": f"Model loading ({model_loading_status})", "model_loading_status": model_loading_status})
-    if model_loading_status == "failed":
-        return JSONResponse(content={"status": "offline", "detail": "Model failed to load", "model_loading_status": model_loading_status})
-    if engine is None:
-        return JSONResponse(content={"status": "offline", "detail": "Model not loaded", "model_loading_status": model_loading_status})
-    return JSONResponse(content={"status": "online", "detail": "System ready", "model_loading_status": model_loading_status})
+    return JSONResponse(content=dict(inference_provider.status()))
 
 def _iter_request_json_paths() -> list[str]:
     paths = []
@@ -456,208 +333,58 @@ async def admin_whoami(request: Request):
         "cf_connecting_ip": request.headers.get("cf-connecting-ip"),
     })
 
-@app.post("/predict")
-async def predict(request: Request, image: Optional[UploadFile] = File(None), ecg: list[UploadFile] = File(None)):
-    if engine is None:
-        raise HTTPException(status_code=500, detail="Model not loaded")
-    if not image and not ecg:
-        raise HTTPException(status_code=400, detail="Please provide at least one input (Image or ECG signal).")
+def _default_request_config(stream: bool = False) -> dict:
+    return {
+        "temperature": 0.0,
+        "max_tokens": 2048,
+        "top_p": 1.0,
+        "top_k": 0,
+        "repetition_penalty": 1.0,
+        "stream": stream,
+    }
 
-    from swift.llm import InferRequest, RequestConfig
+def _build_prompt(prompt_tags: str) -> str:
+    return (
+        f"{prompt_tags}Interpret the provided ECG image, identify key features "
+        "and abnormalities in each lead, and generate a clinical diagnosis that "
+        "is supported by the observed evidence."
+    )
 
-    date_str = _date_str()
-    request_id = _make_request_id(date_str)
-    request_dir = _make_request_dir(request_id, date_str)
-    
-    try:
-        images_list = []
-        objects_dict = {}
-        prompt_tags = ""
-        inputs = {}
-        
-        # Handle ECG files
-        if ecg:
-            # Expect .dat and .hea
-            dat_file = None
-            hea_file = None
-            for f in ecg:
-                fname = _safe_filename(f.filename)
-                ext = os.path.splitext(fname)[1].lower()
-                path = os.path.join(request_dir, fname)
-                with open(path, "wb") as fo:
-                    shutil.copyfileobj(f.file, fo)
-                
-                if ext == '.dat':
-                    dat_file = path
-                elif ext == '.hea':
-                    hea_file = path
-                
-                # Also record in inputs for logging
-                if "ecg_files" not in inputs:
-                    inputs["ecg_files"] = []
-                inputs["ecg_files"].append(fname)
-
-            if dat_file and hea_file:
-                # Use .hea path for objects_dict as wfdb.rdsamp expects header path (without extension usually works, but here we pass .hea and let loader handle or pass base)
-                # Actually wfdb rdsamp expects the record name (without extension).
-                # But our custom loader might expect the full path to .hea or .dat?
-                # Let's check my_register_v3.py load_ecg. It uses wfdb.rdsamp(path).
-                # wfdb.rdsamp(path) where path is /path/to/record (no extension) usually works if both .dat and .hea exist.
-                
-                # We will pass the common prefix (record name) to the engine
-                # Assuming they share the same basename.
-                base_dat = os.path.splitext(dat_file)[0]
-                base_hea = os.path.splitext(hea_file)[0]
-                
-                if base_dat != base_hea:
-                    # If basenames differ, we might have issues if wfdb expects them to match.
-                    # For now, we assume user uploaded matching pair.
-                    pass
-
-                # Pass the record path (without extension) to the engine
-                # But wait, my_register_v3.py: load_ecg calls wfdb.rdsamp(path).
-                # If path has extension, wfdb might handle it or fail.
-                # Standard wfdb.rdsamp arg is 'record_name'.
-                
-                # Let's pass the record name (without extension).
-                # Ensure we strip extension.
-                record_path = base_hea 
-                
-                objects_dict['ecg'] = [record_path]
-                prompt_tags += "<ecg>"
-                inputs["ecg_record"] = os.path.basename(record_path)
-            else:
-                 # If only one provided or mismatch, we might skip or fail? 
-                 # For now if we don't have a pair, we just don't add to objects_dict?
-                 # Or we try our best.
-                 pass
-            
-        # Handle Image file
-        if image and image.filename:
-            image_name = _safe_filename(image.filename)
-            image_path = os.path.join(request_dir, image_name)
-            with open(image_path, "wb") as f:
-                shutil.copyfileobj(image.file, f)
-            images_list.append(image_path)
-            prompt_tags += "<image>"
-            inputs["image"] = image_name
-            
-        # Construct prompt
-        prompt = f"{prompt_tags}nterpret the provided ECG image, identify key features and abnormalities in each lead, and generate a clinical diagnosis that is supported by the observed evidence."
-        
-        infer_request = InferRequest(
-            messages=[{'role': 'user', 'content': prompt}],
-            images=images_list,
-            objects=objects_dict
-        )
-        
-        request_config = RequestConfig(temperature=0.0, max_tokens=2048, top_p=0, top_k=0, repetition_penalty=1.0)
-        
-        resp_list = engine.infer([infer_request], request_config)
-        result_text = resp_list[0].choices[0].message.content
-        
-        # --- Data Collection ---
-        client_ip = _client_ip(request)
-        client_geo = _client_geo(request)
-
-        collected_info = {
-            "request_id": request_id,
-            "timestamp": datetime.datetime.now().isoformat(),
-            "date": date_str,
-            "inputs": inputs,
-            "client": {
-                "ip": client_ip,
-                "geo": client_geo,
-                "user_agent": request.headers.get("user-agent"),
-            },
-            "model_output": result_text,
-            "meta_info": {
-                "model_path": config.MODEL_PATH,
-                "model_display_name": config.MODEL_DISPLAY_NAME,
-                "ecg_tower_path": config.ECG_TOWER_PATH,
-                "request_config": {
-                    "temperature": 0.0,
-                    "max_tokens": 2048,
-                    "top_p": 0,
-                    "top_k": 0,
-                    "repetition_penalty": 1.0,
-                    "stream": False,
-                },
-            },
-            "feedback": None
-        }
-            
-        # Save JSON data
-        with open(os.path.join(request_dir, "data.json"), "w") as f:
-            json.dump(collected_info, f, indent=4, ensure_ascii=False)
-            
-        return JSONResponse(content={"result": result_text, "request_id": request_id})
-        
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
-@app.post("/predict_start")
-async def predict_start(
-    request: Request,
-    image: Optional[UploadFile] = File(None),
-    ecg: list[UploadFile] = File(None),
-):
-    """
-    给微信小程序用的接口：
-    1. 校验 + 保存文件
-    2. 组装 InferRequest
-    3. 初始化 stream_states[request_id]
-    4. 启动后台线程做推理
-    5. 立刻返回 request_id
-    """
-    if engine is None:
-        raise HTTPException(status_code=500, detail="Model not loaded")
-
-    if not image and not ecg:
-        raise HTTPException(status_code=400, detail="Please provide at least one input (Image or ECG signal).")
-
-    from swift.llm import InferRequest, RequestConfig
-
-    date_str = _date_str()
-    request_id = _make_request_id(date_str)
-    request_dir = _make_request_dir(request_id, date_str)
-    client_ip = _client_ip(request)
-    client_geo = _client_geo(request)
-
+def _prepare_provider_request(
+    image: Optional[UploadFile],
+    ecg: Optional[list[UploadFile]],
+    request_dir: str,
+    stream: bool,
+) -> tuple[InferenceRequest, dict]:
     images_list = []
     objects_dict = {}
     prompt_tags = ""
     inputs: dict = {}
 
-    # ECG 处理（基本照抄你原来的逻辑）
     if ecg:
         dat_file = None
         hea_file = None
-        for f in ecg:
-            fname = _safe_filename(f.filename)
+        for uploaded in ecg:
+            fname = _safe_filename(uploaded.filename)
             ext = os.path.splitext(fname)[1].lower()
             path = os.path.join(request_dir, fname)
             with open(path, "wb") as fo:
-                shutil.copyfileobj(f.file, fo)
+                shutil.copyfileobj(uploaded.file, fo)
 
             if ext == ".dat":
                 dat_file = path
             elif ext == ".hea":
                 hea_file = path
+            inputs.setdefault("ecg_files", []).append(fname)
 
-            if "ecg_files" not in inputs:
-                inputs["ecg_files"] = []
-            inputs["ecg_files"].append(fname)
+        if not dat_file or not hea_file:
+            raise HTTPException(status_code=400, detail="ECG signal requires both .dat and .hea files.")
 
-        if dat_file and hea_file:
-            base_hea = os.path.splitext(hea_file)[0]
-            record_path = base_hea
-            objects_dict["ecg"] = [record_path]
-            prompt_tags += "<ecg>"
-            inputs["ecg_record"] = os.path.basename(record_path)
+        record_path = os.path.splitext(hea_file)[0]
+        objects_dict["ecg"] = [record_path]
+        prompt_tags += "<ecg>"
+        inputs["ecg_record"] = os.path.basename(record_path)
 
-    # 图像处理（照抄你原来的逻辑）
     if image and image.filename:
         image_name = _safe_filename(image.filename)
         image_path = os.path.join(request_dir, image_name)
@@ -667,27 +394,145 @@ async def predict_start(
         prompt_tags += "<image>"
         inputs["image"] = image_name
 
-    # prompt & InferRequest
-    prompt = (
-        f"{prompt_tags}Interpret the provided ECG image, identify key features and "
-        f"abnormalities in each lead, and generate a clinical diagnosis that is "
-        f"supported by the observed evidence."
-    )
-    infer_request = InferRequest(
+    prompt = _build_prompt(prompt_tags)
+    provider_request = InferenceRequest(
         messages=[{"role": "user", "content": prompt}],
         images=images_list,
         objects=objects_dict,
+        request_config=_default_request_config(stream=stream),
     )
-    request_config = RequestConfig(
-        temperature=0.0,
-        max_tokens=2048,
-        top_p=0,
-        top_k=0,
-        repetition_penalty=1.0,
-        stream=True,  # 仍然可以用流式推理逻辑
-    )
+    return provider_request, inputs
 
-    # 初始化状态
+def _record_meta(request_config: dict, stream: bool) -> dict:
+    meta = {
+        "provider": inference_provider.name,
+        "model_path": config.MODEL_PATH,
+        "model_display_name": config.MODEL_DISPLAY_NAME,
+        "ecg_tower_path": config.ECG_TOWER_PATH,
+        "request_config": dict(request_config),
+    }
+    meta["request_config"]["stream"] = stream
+    return meta
+
+def _write_request_record(
+    request_dir: str,
+    request_id: str,
+    date_str: str,
+    inputs: dict,
+    client_ip: str,
+    client_geo: dict,
+    user_agent: Optional[str],
+    content: str,
+    reasoning: str,
+    request_config: dict,
+    stream: bool,
+):
+    collected_info = {
+        "request_id": request_id,
+        "timestamp": datetime.datetime.now().isoformat(),
+        "date": date_str,
+        "inputs": inputs,
+        "client": {
+            "ip": client_ip,
+            "geo": client_geo,
+            "user_agent": user_agent,
+        },
+        "model_output": content,
+        "reasoning_output": reasoning,
+        "meta_info": _record_meta(request_config, stream=stream),
+        "feedback": None,
+    }
+    with open(os.path.join(request_dir, "data.json"), "w") as f:
+        json.dump(collected_info, f, indent=4, ensure_ascii=False)
+
+async def _predict_once_provider(
+    request: Request,
+    image: Optional[UploadFile],
+    ecg: Optional[list[UploadFile]],
+):
+    if not image and not ecg:
+        raise HTTPException(status_code=400, detail="Please provide at least one input (Image or ECG signal).")
+
+    date_str = _date_str()
+    request_id = _make_request_id(date_str)
+    request_dir = _make_request_dir(request_id, date_str)
+    provider_request, inputs = _prepare_provider_request(image, ecg, request_dir, stream=False)
+    client_ip = _client_ip(request)
+    client_geo = _client_geo(request)
+
+    result = inference_provider.infer(provider_request)
+    _write_request_record(
+        request_dir=request_dir,
+        request_id=request_id,
+        date_str=date_str,
+        inputs=inputs,
+        client_ip=client_ip,
+        client_geo=client_geo,
+        user_agent=request.headers.get("user-agent"),
+        content=result.content,
+        reasoning=result.reasoning,
+        request_config=provider_request.request_config,
+        stream=False,
+    )
+    return JSONResponse(content={"result": result.content, "request_id": request_id})
+
+def _start_provider_background(
+    request_id: str,
+    request_dir: str,
+    date_str: str,
+    client_ip: str,
+    client_geo: dict,
+    user_agent: Optional[str],
+    provider_request: InferenceRequest,
+    inputs: dict,
+):
+    def _run():
+        content_buf = ""
+        reasoning_buf = ""
+        try:
+            for chunk in inference_provider.stream(provider_request):
+                if chunk.event == "reasoning":
+                    stream_states[request_id]["reasoning"] += chunk.text
+                    reasoning_buf += chunk.text
+                else:
+                    stream_states[request_id]["content"] += chunk.text
+                    content_buf += chunk.text
+
+            _write_request_record(
+                request_dir=request_dir,
+                request_id=request_id,
+                date_str=date_str,
+                inputs=inputs,
+                client_ip=client_ip,
+                client_geo=client_geo,
+                user_agent=user_agent,
+                content=content_buf,
+                reasoning=reasoning_buf,
+                request_config=provider_request.request_config,
+                stream=True,
+            )
+            stream_states[request_id]["done"] = True
+        except Exception as exc:
+            stream_states[request_id]["error"] = str(exc)
+            stream_states[request_id]["done"] = True
+
+    threading.Thread(target=_run, daemon=True).start()
+
+async def _predict_start_provider(
+    request: Request,
+    image: Optional[UploadFile],
+    ecg: Optional[list[UploadFile]],
+):
+    if not image and not ecg:
+        raise HTTPException(status_code=400, detail="Please provide at least one input (Image or ECG signal).")
+
+    date_str = _date_str()
+    request_id = _make_request_id(date_str)
+    request_dir = _make_request_dir(request_id, date_str)
+    client_ip = _client_ip(request)
+    client_geo = _client_geo(request)
+    provider_request, inputs = _prepare_provider_request(image, ecg, request_dir, stream=True)
+
     stream_states[request_id] = {
         "started_at": time.time(),
         "request_dir": request_dir,
@@ -698,169 +543,32 @@ async def predict_start(
         "done": False,
         "error": None,
     }
-
-    # 启动后台推理
-    _start_background_infer(
+    _start_provider_background(
         request_id=request_id,
         request_dir=request_dir,
         date_str=date_str,
         client_ip=client_ip,
         client_geo=client_geo,
-        infer_request=infer_request,
-        request_config=request_config,
+        user_agent=request.headers.get("user-agent"),
+        provider_request=provider_request,
         inputs=inputs,
     )
-
-    # 立刻返回 request_id，前端拿这个去轮询 /predict_progress/{request_id}
     return {"request_id": request_id}
-def _start_background_infer(request_id: str,
-                            request_dir: str,
-                            date_str: str,
-                            client_ip: str,
-                            client_geo: dict,
-                            infer_request,
-                            request_config,
-                            inputs: dict):
-    """
-    启动一个后台线程做推理，把结果累计写入 stream_states[request_id]，
-    完成后写 data.json，并把 done / error 状态更新好。
-    """
-    def _run():
-        content_buf = ""
-        reasoning_buf = ""
-        try:
-            resp_list = engine.infer([infer_request], request_config)
-            item = resp_list[0] if resp_list else None
 
-            if item is not None and hasattr(item, "__iter__") and not hasattr(item, "choices"):
-                # 流式输出
-                for chunk in item:
-                    for choice in getattr(chunk, "choices", []) or []:
-                        delta = getattr(choice, "delta", None)
-                        if delta is None:
-                            continue
-                        rc = getattr(delta, "reasoning_content", None)
-                        if rc:
-                            stream_states[request_id]["reasoning"] += rc
-                            reasoning_buf += rc
-                        c = getattr(delta, "content", None)
-                            # 注意缩进保持一致
-                        if c:
-                            stream_states[request_id]["content"] += c
-                            content_buf += c
-            else:
-                # 一次性输出，手动切块
-                result_text = getattr(
-                    getattr(getattr(item, "choices", [None])[0], "message", None),
-                    "content",
-                    ""
-                ) if item is not None else ""
-                if result_text:
-                    chunk_size = 64
-                    for i in range(0, len(result_text), chunk_size):
-                        chunk = result_text[i:i + chunk_size]
-                        stream_states[request_id]["content"] += chunk
-                        content_buf += chunk
-
-            collected_info = {
-                "request_id": request_id,
-                "timestamp": datetime.datetime.now().isoformat(),
-                "date": date_str,
-                "inputs": inputs,
-                "model_output": content_buf,
-                "reasoning_output": reasoning_buf,
-                "client": {
-                    "ip": client_ip,
-                    "geo": client_geo,
-                    "user_agent": None,
-                },
-                "meta_info": {
-                    "model_path": config.MODEL_PATH,
-                    "model_display_name": config.MODEL_DISPLAY_NAME,
-                    "ecg_tower_path": config.ECG_TOWER_PATH,
-                    "request_config": {
-                        "temperature": request_config.temperature,
-                        "max_tokens": request_config.max_tokens,
-                        "top_p": request_config.top_p,
-                        "top_k": request_config.top_k,
-                        "repetition_penalty": request_config.repetition_penalty,
-                        "stream": request_config.stream,
-                    },
-                },
-                "feedback": None,
-            }
-
-            with open(os.path.join(request_dir, "data.json"), "w") as f:
-                json.dump(collected_info, f, indent=4, ensure_ascii=False)
-
-            stream_states[request_id]["done"] = True
-        except Exception as e:
-            stream_states[request_id]["error"] = str(e)
-            stream_states[request_id]["done"] = True
-
-    threading.Thread(target=_run, daemon=True).start()
-@app.post("/predict_stream")
-async def predict_stream(request: Request, image: Optional[UploadFile] = File(None), ecg: list[UploadFile] = File(None)):
-    if engine is None:
-        raise HTTPException(status_code=500, detail="Model not loaded")
+async def _predict_stream_provider(
+    request: Request,
+    image: Optional[UploadFile],
+    ecg: Optional[list[UploadFile]],
+):
     if not image and not ecg:
         raise HTTPException(status_code=400, detail="Please provide at least one input (Image or ECG signal).")
-
-    from swift.llm import InferRequest, RequestConfig
 
     date_str = _date_str()
     request_id = _make_request_id(date_str)
     request_dir = _make_request_dir(request_id, date_str)
     client_ip = _client_ip(request)
     client_geo = _client_geo(request)
-
-    images_list = []
-    objects_dict = {}
-    prompt_tags = ""
-    inputs = {}
-
-    if ecg:
-        dat_file = None
-        hea_file = None
-        for f in ecg:
-            fname = _safe_filename(f.filename)
-            ext = os.path.splitext(fname)[1].lower()
-            path = os.path.join(request_dir, fname)
-            with open(path, "wb") as fo:
-                shutil.copyfileobj(f.file, fo)
-            
-            if ext == '.dat':
-                dat_file = path
-            elif ext == '.hea':
-                hea_file = path
-            
-            if "ecg_files" not in inputs:
-                inputs["ecg_files"] = []
-            inputs["ecg_files"].append(fname)
-        
-        if dat_file and hea_file:
-            base_hea = os.path.splitext(hea_file)[0]
-            record_path = base_hea
-            objects_dict['ecg'] = [record_path]
-            prompt_tags += "<ecg>"
-            inputs["ecg_record"] = os.path.basename(record_path)
-
-    if image and image.filename:
-        image_name = _safe_filename(image.filename)
-        image_path = os.path.join(request_dir, image_name)
-        with open(image_path, "wb") as f:
-            shutil.copyfileobj(image.file, f)
-        images_list.append(image_path)
-        prompt_tags += "<image>"
-        inputs["image"] = image_name
-
-    prompt = f"{prompt_tags}Interpret the provided ECG image, identify key features and abnormalities in each lead, and generate a clinical diagnosis that is supported by the observed evidence."
-    infer_request = InferRequest(
-        messages=[{"role": "user", "content": prompt}],
-        images=images_list,
-        objects=objects_dict,
-    )
-    request_config = RequestConfig(temperature=0.0, max_tokens=2048, top_p=0, top_k=0, repetition_penalty=1.0, stream=True)
+    provider_request, inputs = _prepare_provider_request(image, ecg, request_dir, stream=True)
 
     stream_states[request_id] = {
         "started_at": time.time(),
@@ -878,45 +586,25 @@ async def predict_stream(request: Request, image: Optional[UploadFile] = File(No
         reasoning_buf = ""
         q: "queue.Queue[tuple[str, str]]" = queue.Queue()
         started_at = time.time()
-        max_wait_s = 600
+        max_wait_s = config.INFERENCE_TIMEOUT_S + 30
 
         def _run_infer():
             try:
-                resp_list = engine.infer([infer_request], request_config)
-                item = resp_list[0] if resp_list else None
-
-                if item is not None and hasattr(item, "__iter__") and not hasattr(item, "choices"):
-                    for chunk in item:
-                        for choice in getattr(chunk, "choices", []) or []:
-                            delta = getattr(choice, "delta", None)
-                            if delta is None:
-                                continue
-                            rc = getattr(delta, "reasoning_content", None)
-                            if rc:
-                                stream_states[request_id]["reasoning"] += rc
-                                q.put(("reasoning", rc))
-                            c = getattr(delta, "content", None)
-                            if c:
-                                stream_states[request_id]["content"] += c
-                                q.put(("content", c))
-                else:
-                    result_text = getattr(getattr(getattr(item, "choices", [None])[0], "message", None), "content", "") if item is not None else ""
-                    if result_text:
-                        chunk_size = 64
-                        for i in range(0, len(result_text), chunk_size):
-                            chunk = result_text[i:i + chunk_size]
-                            stream_states[request_id]["content"] += chunk
-                            q.put(("content", chunk))
-
+                for chunk in inference_provider.stream(provider_request):
+                    if chunk.event == "reasoning":
+                        stream_states[request_id]["reasoning"] += chunk.text
+                        q.put(("reasoning", chunk.text))
+                    else:
+                        stream_states[request_id]["content"] += chunk.text
+                        q.put(("content", chunk.text))
                 stream_states[request_id]["done"] = True
                 q.put(("done", request_id))
-            except Exception as e:
-                stream_states[request_id]["error"] = str(e)
+            except Exception as exc:
+                stream_states[request_id]["error"] = str(exc)
                 stream_states[request_id]["done"] = True
-                q.put(("error", str(e)))
+                q.put(("error", str(exc)))
 
-        thread = threading.Thread(target=_run_infer, daemon=True)
-        thread.start()
+        threading.Thread(target=_run_infer, daemon=True).start()
 
         try:
             yield f"event: ready\ndata: {json.dumps({'request_id': request_id}, ensure_ascii=False)}\n\n"
@@ -943,42 +631,24 @@ async def predict_stream(request: Request, image: Optional[UploadFile] = File(No
                     yield f"event: error\ndata: {json.dumps({'detail': payload}, ensure_ascii=False)}\n\n"
                     return
 
-            collected_info = {
-                "request_id": request_id,
-                "timestamp": datetime.datetime.now().isoformat(),
-                "date": date_str,
-                "inputs": inputs,
-                "model_output": content_buf,
-                "reasoning_output": reasoning_buf,
-                "client": {
-                    "ip": client_ip,
-                    "geo": client_geo,
-                    "user_agent": request.headers.get("user-agent"),
-                },
-                "meta_info": {
-                    "model_path": config.MODEL_PATH,
-                    "model_display_name": config.MODEL_DISPLAY_NAME,
-                    "ecg_tower_path": config.ECG_TOWER_PATH,
-                    "request_config": {
-                        "temperature": 0.0,
-                        "max_tokens": 2048,
-                        "top_p": 0,
-                        "top_k": 0,
-                        "repetition_penalty": 1.0,
-                        "stream": True,
-                    },
-                },
-                "feedback": None,
-            }
-
-            with open(os.path.join(request_dir, "data.json"), "w") as f:
-                json.dump(collected_info, f, indent=4, ensure_ascii=False)
-
+            _write_request_record(
+                request_dir=request_dir,
+                request_id=request_id,
+                date_str=date_str,
+                inputs=inputs,
+                client_ip=client_ip,
+                client_geo=client_geo,
+                user_agent=request.headers.get("user-agent"),
+                content=content_buf,
+                reasoning=reasoning_buf,
+                request_config=provider_request.request_config,
+                stream=True,
+            )
             yield f"event: done\ndata: {json.dumps({'request_id': request_id}, ensure_ascii=False)}\n\n"
-        except Exception as e:
-            stream_states[request_id]["error"] = str(e)
+        except Exception as exc:
+            stream_states[request_id]["error"] = str(exc)
             stream_states[request_id]["done"] = True
-            yield f"event: error\ndata: {json.dumps({'detail': str(e)}, ensure_ascii=False)}\n\n"
+            yield f"event: error\ndata: {json.dumps({'detail': str(exc)}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(
         event_gen(),
@@ -991,12 +661,32 @@ async def predict_stream(request: Request, image: Optional[UploadFile] = File(No
         },
     )
 
+@app.post("/predict")
+async def predict(request: Request, image: Optional[UploadFile] = File(None), ecg: list[UploadFile] = File(None)):
+    return await _predict_once_provider(request, image, ecg)
+
+
+@app.post("/predict_start")
+async def predict_start(
+    request: Request,
+    image: Optional[UploadFile] = File(None),
+    ecg: list[UploadFile] = File(None),
+):
+    return await _predict_start_provider(request, image, ecg)
+
+
+@app.post("/predict_stream")
+async def predict_stream(request: Request, image: Optional[UploadFile] = File(None), ecg: list[UploadFile] = File(None)):
+    return await _predict_stream_provider(request, image, ecg)
+
+
 @app.get("/predict_progress/{request_id}")
 async def predict_progress(request_id: str):
     state = stream_states.get(request_id)
     if not state:
         raise HTTPException(status_code=404, detail="Request not found")
     return state
+
 
 @app.post("/feedback")
 async def submit_feedback(request: Request, data: dict = Body(...)):

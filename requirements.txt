@@ -4,4 +4,5 @@ python-multipart
 jinja2
 torch
 transformers
+wfdb
 # Add other dependencies from ecg-r1 if needed, but we assume they are installed in the env
