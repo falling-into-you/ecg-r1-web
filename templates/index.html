@@ -40,7 +40,7 @@
                         <div class="upload-group">
                             <label class="input-label">ECG Image</label>
                             <div class="drop-zone" id="imageDropZone">
-                                <input type="file" id="imageInput" name="image" accept=".png, .jpg" class="file-input">
+                                <input type="file" id="imageInput" name="image" accept=".png, .jpg, .jpeg" class="file-input">
                                 <div class="drop-content">
                                     <i class="fa-regular fa-image upload-icon"></i>
                                     <p class="upload-text">Drag & drop or click to upload ECG Image</p>
@@ -86,6 +86,10 @@
                             <div class="requirements-example-title">Example image</div>
                             <img class="requirements-example-img" id="exampleEcgImage" src="/static/example/49722328-0.png" alt="Example ECG Input">
                             <div class="requirements-example-hint">Click the example image to use it as your input.</div>
+                            <ul class="requirements-example-notes">
+                                <li>Use a formal ECG image with a standard 12-lead layout when possible.</li>
+                                <li>Capture it straight-on. Avoid tilted, skewed, cropped, or rotated photos.</li>
+                            </ul>
                         </div>
                     </div>
                 </section>
