@@ -24,6 +24,16 @@ class VLLMDirectProvider:
             req = urllib.request.Request(self.health_url, method="GET")
             with urllib.request.urlopen(req, timeout=5) as resp:
                 body = resp.read().decode("utf-8", errors="ignore")
+            health_status = self._health_status(body)
+            if health_status not in ("ok", "online", "ready"):
+                return {
+                    "status": "loading" if health_status in ("loading", "pending") else "offline",
+                    "detail": f"Direct vLLM health status is {health_status or 'unknown'}",
+                    "provider": self.name,
+                    "infer_url": self.infer_url,
+                    "health_url": self.health_url,
+                    "health_body": body[:300],
+                }
             self._last_online_at = time.time()
             self._last_health_body = body[:300]
             return {
@@ -53,6 +63,15 @@ class VLLMDirectProvider:
                 "infer_url": self.infer_url,
                 "health_url": self.health_url,
             }
+
+    def _health_status(self, body: str) -> str:
+        try:
+            payload = json.loads(body)
+        except json.JSONDecodeError:
+            return "ok" if body.strip() else "unknown"
+        if isinstance(payload, dict):
+            return str(payload.get("status") or "").strip().lower()
+        return "unknown"
 
     def infer(self, request: InferenceRequest) -> InferenceResult:
         payload = self._payload(request, stream=False)

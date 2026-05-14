@@ -21,6 +21,17 @@
 - Web：`tmux new -d -s ecg-r1-web 'cd /data/jinjiarui/run/ecg-r1-web && bash scripts/serve_web.sh'`
 - 查看日志：`tmux capture-pane -t ecg-r1-web -p -S -80`
 
+### 停止与状态判断
+- Web 和 vLLM 是两个独立进程。停止 Web 不会停止 vLLM；停止 vLLM 也不需要重启 Web。
+- `ecg-r1-web` tmux 会话通常只负责 8000 端口的 FastAPI/uvicorn。
+- `ecg-r1-rollout` tmux 会话通常负责 8023 端口的直接 vLLM 服务。
+- 停止 vLLM 时，确认 8023 不再监听：
+  - `tmux kill-session -t ecg-r1-rollout`
+  - 或 `ss -ltnp 'sport = :8023'`
+- `/status` 的 `online/loading/offline` 来自 Web 对 vLLM `VLLM_HEALTH_URL` 的健康检查，不来自特殊响应头。
+- vLLM 健康检查不仅要求 8023 进程存活，还会在引擎生成异常后返回非 200，避免 EngineDead 仍显示 Online。
+- vLLM 停止后，Web 可能在最近一次健康检查成功后的 120 秒内返回 `loading`，之后才返回 `offline`。
+
 ## Nginx 部署（域名代理到 8000）
 DNS 解析无法直接携带端口；做法是让域名解析到服务器 IP，然后用 Nginx 在 80/443 端口反向代理到 `127.0.0.1:8000`。
 
@@ -131,6 +142,7 @@ Ubuntu 22.04 示例（需要 sudo 权限）：
 - 增加后端健康检查与 GPU/模型加载状态页（当前已有 /status，后续可扩展）
 
 ## 版本记录（手动维护）
+- 2026-05-14：补充 vLLM/Web 独立启动停止说明；明确远程状态 badge 依赖 `/status` JSON；vLLM health 在引擎错误时返回非 200
 - 2026-05-13：推理服务从 Swift GRPO rollout 切换为直接 vLLM `AsyncLLMEngine`；新增 `vllm_direct` provider 和 `scripts/serve_vllm.sh`，支持真实流式增量输出
 - 2026-05-13：将启动配置收敛到仓库内 `config.py`；启动脚本不再读取外部 shell 环境变量作为配置来源，并按配置激活 conda 环境
 - 2026-05-13：重构推理边界；新增 provider 架构、Swift rollout 适配、本仓库内 ECG-R1 vLLM runtime 代码、独立 Web/rollout 启动脚本

@@ -20,9 +20,21 @@
 
 * **8000**：FastAPI/uvicorn 实际监听端口（内部端口）
 
+* **8023**：直接 vLLM 推理服务端口（Web 通过 `VLLM_HEALTH_URL` / `VLLM_URL` 访问）
+
 * **80**：当前 Web 页面入口（Nginx -> 8000）
 
 * **44000**：远程推理 API 入口（Nginx -> 8000，API-only）
+
+Web、Nginx、vLLM 是独立层：
+
+* 停止 Web 不会停止 8023 上的 vLLM。
+
+* 停止 vLLM 不需要重启 Web；Web 会继续提供页面和 `/status`。
+
+* 线上 tmux 常用会话名：`ecg-r1-web` 管 8000，`ecg-r1-rollout` 管 8023。
+
+* 停止 vLLM 后应确认 8023 不再监听，例如：`ss -ltnp 'sport = :8023'`。
 
 ### 2.2 重要设计点：为什么 44000 不是“再起一个 44000 的 FastAPI”
 
@@ -64,7 +76,7 @@
 
 | Method | Path             | 说明                      |
 | ------ | ---------------- | ----------------------- |
-| GET    | /status          | 健康检查 + 模型加载状态           |
+| GET    | /status          | Web 对推理后端的健康检查状态        |
 | POST   | /predict\_stream | 流式推理（SSE）               |
 | POST   | /predict         | 非流式推理（JSON）             |
 | POST   | /feedback        | 对某次 request\_id 的反馈（可选） |
@@ -167,12 +179,36 @@ GET /status
 
 * `detail`：人类可读描述
 
-* `model_loading_status`：`pending | loading | success | failed`
+* `provider`：当前推理 provider，例如 `vllm_direct`
+
+* `infer_url`：Web 访问推理接口的内部地址
+
+* `health_url`：Web 访问健康检查接口的内部地址
+
+* `health_body`：最近一次健康检查返回体摘要，仅在成功或短期 loading 状态下可能存在
+
+状态语义：
+
+* `online`：Web 请求 vLLM 健康检查地址成功。
+
+* `loading`：vLLM 明确返回 loading/pending，或最近 120 秒内曾经成功但当前健康检查失败。用于覆盖重启或短暂抖动。
+
+* `offline`：健康检查失败，且没有最近成功记录，或最近成功已经超过 120 秒。
+
+注意：
+
+* 当前 vLLM/provider 架构不再保证返回旧字段 `model_loading_status`。
+
+* 远程前端应只依赖 `status` 判断 Online / Loading / Offline。
+
+* 状态不是通过特殊响应头表示；响应头里的 `X-Request-ID` 只用于 `/predict_stream` 的请求追踪，`X-Accel-Buffering` 只用于关闭 Nginx 缓冲。
+
+* vLLM `/health/` 在引擎生成异常后应返回非 200，避免仅因 8023 进程仍存活而误判 Online。
 
 示例：
 
 ```json
-{"status":"online","detail":"System ready","model_loading_status":"success"}
+{"status":"online","detail":"Direct vLLM service returned health status 200","provider":"vllm_direct","infer_url":"http://127.0.0.1:8023/infer/","health_url":"http://127.0.0.1:8023/health/","health_body":"{\"status\":\"ok\"}"}
 ```
 
 ## 7. POST /predict（非流式）
@@ -341,6 +377,16 @@ for raw in resp.iter_lines(decode_unicode=True):
 
 * 前端会每 10 秒轮询 `/status` 并更新 `System Online/Loading/Offline`
 
+如果页面走前端服务器同域反代，推荐写成：
+
+```html
+<meta name="ecg-api-base" content="/ecg_api">
+```
+
+并在前端服务器把 `/ecg_api/*` 反代到 `http://<gpu-server-ip>:44000/*`。
+
+如果该 meta 为空，浏览器会请求页面同源的 `/status`。这时状态可能来自前端服务器自身，而不是显卡服务器。
+
 ## 11. 一键验证脚本
 
 * 综合验证（/status + /predict + /predict\_stream）：[test\_remote\_api\_44000.sh](file:///data/jinjiarui/run/ecg-r1-web/scripts/test_remote_api_44000.sh)
@@ -371,5 +417,15 @@ bash scripts/test_predict_stream_with_image.sh http://127.0.0.1:44000 /data/jinj
 * 44000 能打开页面：
 
   * 说明 Nginx 未做 API 白名单或未对 `/` 返回 404，需要检查 44000 server block 配置
+
+* 已经停止 vLLM，但远程页面仍显示 Online：
+
+  * 先在显卡服务器上确认 8023 是否仍在监听：`ss -ltnp 'sport = :8023'`
+
+  * 如果仍有 `python -m ecg_r1_runtime.serve_vllm`，说明 vLLM 进程还在运行，常见来源是 `ecg-r1-rollout` tmux 会话。
+
+  * 如果 8023 已经停止，`/status` 可能在最近成功后的 120 秒内显示 `loading`，之后才变为 `offline`。
+
+  * 如果远程页面一直不变，检查页面里的 `ecg-api-base` 是否指向 GPU API，或前端服务器 `/ecg_api/status` 是否正确反代到 `gpu:44000/status`。
 
 可关闭该策略：`GEO_OVERRIDE_TW_AS_CN=0`。

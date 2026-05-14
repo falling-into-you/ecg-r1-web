@@ -10,7 +10,8 @@
 - 透传用户 IP（以及可选地理信息）到显卡服务器，供统计与审计
 
 **显卡服务器**负责：
-- 运行模型推理服务（FastAPI 内部 8000，通过 Nginx 暴露 44000 为 API-only）
+- 运行 Web/API 服务（FastAPI 内部 8000，通过 Nginx 暴露 44000 为 API-only）
+- 运行直接 vLLM 推理服务（默认 8023，供 Web/API 内部调用）
 - 返回推理结果（支持 SSE 流式）
 
 这样做的好处：
@@ -67,6 +68,15 @@
 ```
 
 此方案需要显卡服务器配置好 CORS，且仍要考虑 44000 的访问控制。
+
+状态 badge 只看 `GET <api-base>/status` 返回体里的 `status` 字段：
+- `online`：显示 `System Online`
+- `loading`：显示 `System Loading`
+- 其它值或请求失败：显示 `System Offline` / `Connection Error`
+
+这里没有用于上下线判断的特殊响应头。`X-Request-ID` 只用于推理请求追踪，`X-Accel-Buffering` 只用于 SSE 关闭代理缓冲。
+
+如果 `ecg-api-base` 为空，浏览器会请求页面同源的 `/status`。页面部署在前端服务器时，这通常不是显卡服务器状态，除非前端服务器也把 `/status` 反代到了显卡服务器。
 
 ## 4. 前端服务器 Nginx 反代配置（带 IP 透传）
 
@@ -137,7 +147,23 @@ curl -sS http://<frontend-domain>/ecg_api/predict \
 ## 9. 自测
 
 在前端服务器上：
-- `curl http://127.0.0.1/ecg_api/status` 应返回 online JSON
+- `curl http://127.0.0.1/ecg_api/status` 应返回显卡服务器的状态 JSON
 - 用浏览器上传一条推理请求，确认：
   - 推理正常
   - `X-Forwarded-For` 链路正确（可在显卡服务器 data collection 的记录里看到 client.ip）
+
+## 10. 显卡服务器上下线检查
+
+当前架构里 Web、Nginx、vLLM 是独立进程：
+- 8000：FastAPI/uvicorn
+- 44000：Nginx API-only 入口，反代到 8000
+- 8023：直接 vLLM 推理服务
+
+远程页面显示 Online 的条件是：前端请求到的 `/status` 返回 `{"status":"online"}`。该状态来自 Web 对 8023 vLLM 健康检查接口的结果。
+
+vLLM 引擎生成异常后，健康检查应返回非 200。这样 8023 进程还在但引擎不可用时，远程页面不会继续显示 Online。
+
+停止 vLLM 后：
+- 先确认 8023 不再监听：`ss -ltnp 'sport = :8023'`
+- 如果仍看到 `python -m ecg_r1_runtime.serve_vllm`，说明 vLLM 进程还在运行，常见来源是 `ecg-r1-rollout` tmux 会话
+- 如果 8023 已停，Web 最近一次健康检查成功后的 120 秒内可能返回 `loading`，之后才返回 `offline`

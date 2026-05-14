@@ -18,7 +18,7 @@ for _key, _value in config.RUNTIME_ENV_VARS.items():
 os.environ["VLLM_LOAD_FORMAT"] = str(config.VLLM_LOAD_FORMAT)
 
 from fastapi import FastAPI, HTTPException, Body
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from PIL import Image
 from transformers import AutoTokenizer
 from vllm import AsyncLLMEngine, SamplingParams
@@ -36,6 +36,7 @@ QWEN3VL_FACTOR = 32
 app = FastAPI()
 engine: AsyncLLMEngine | None = None
 tokenizer = None
+engine_error: str | None = None
 
 
 def _mm_processor_kwargs() -> dict[str, int]:
@@ -49,8 +50,9 @@ def _mm_processor_kwargs() -> dict[str, int]:
 
 @app.on_event("startup")
 async def startup() -> None:
-    global engine, tokenizer
+    global engine, tokenizer, engine_error
 
+    engine_error = None
     register_vllm_plugin()
     tokenizer = AutoTokenizer.from_pretrained(config.MODEL_PATH, trust_remote_code=True)
 
@@ -72,9 +74,11 @@ async def startup() -> None:
 
 
 @app.get("/health/")
-async def health() -> dict[str, str]:
+async def health():
     if engine is None:
-        return {"status": "loading"}
+        return JSONResponse(content={"status": "loading"}, status_code=503)
+    if engine_error:
+        return JSONResponse(content={"status": "error", "detail": engine_error[:1000]}, status_code=503)
     return {"status": "ok"}
 
 
@@ -156,20 +160,26 @@ def _sampling_params(request_config: dict[str, Any]) -> SamplingParams:
 
 
 async def _generate(prompt_input: dict[str, Any], sampling_params: SamplingParams) -> AsyncGenerator[str, None]:
+    global engine_error
+
     if engine is None:
         raise RuntimeError("vLLM engine is not ready")
 
     request_id = f"ecg-r1-{uuid.uuid4()}"
     previous_text = ""
-    async for output in engine.generate(prompt_input, sampling_params, request_id=request_id):
-        if not output.outputs:
-            continue
-        text = output.outputs[0].text or ""
-        if len(text) > len(previous_text):
-            delta = text[len(previous_text):]
-            previous_text = text
-            if delta:
-                yield delta
+    try:
+        async for output in engine.generate(prompt_input, sampling_params, request_id=request_id):
+            if not output.outputs:
+                continue
+            text = output.outputs[0].text or ""
+            if len(text) > len(previous_text):
+                delta = text[len(previous_text):]
+                previous_text = text
+                if delta:
+                    yield delta
+    except Exception as exc:
+        engine_error = str(exc)
+        raise
 
 
 async def _generate_text(prompt_input: dict[str, Any], sampling_params: SamplingParams) -> str:
