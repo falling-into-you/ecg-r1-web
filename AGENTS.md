@@ -22,10 +22,10 @@ Runtime startup must use conda environment `swift2`. Do not start Web or vLLM fr
 - `pip install -r requirements.txt`: install dependencies.
 - `bash scripts/serve_web.sh`: run the web app using `WEB_HOST`, `WEB_PORT`, and `INFERENCE_BACKEND` from `config.py`.
 - `bash scripts/serve_vllm.sh`: start direct vLLM inference using `MODEL_PATH`, `ECG_TOWER_PATH`, and runtime settings from `config.py`.
-- `bash scripts/serve_rollout.sh`: compatibility wrapper that delegates to `scripts/serve_vllm.sh`.
-- `bash scripts/test_remote_api_44000.sh http://127.0.0.1:8000`: check `/status`, `/predict`, and `/predict_stream`.
-- `bash scripts/test_predict_stream_with_image.sh http://127.0.0.1:8000 /path/to/image.png`: test streaming image inference.
-- `bash scripts/test_forwarded_ip_capture.sh http://127.0.0.1:8000`: verify forwarded client IP capture.
+- `bash archive/scripts/serve_rollout.sh`: compatibility wrapper that delegates to `scripts/serve_vllm.sh`.
+- `bash archive/scripts/test_remote_api_44000.sh http://127.0.0.1:8000`: check `/status`, `/predict`, and `/predict_stream`.
+- `bash archive/scripts/test_predict_stream_with_image.sh http://127.0.0.1:8000 /path/to/image.png`: test streaming image inference.
+- `bash archive/scripts/test_forwarded_ip_capture.sh http://127.0.0.1:8000`: verify forwarded client IP capture.
 
 Do not reintroduce `ECG_R1_ROOT` or imports from an external ECG-R1 checkout. Use `ecg_r1_runtime/` and project-local `config.py` instead. Runtime environment variables may be exported only inside startup scripts for vLLM compatibility.
 

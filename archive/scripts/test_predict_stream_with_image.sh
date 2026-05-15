@@ -2,7 +2,7 @@
 set -euo pipefail
 
 BASE_URL="${1:-http://127.0.0.1:44000}"
-IMAGE_PATH="${2:-/data/jinjiarui/run/ecg-r1-web/scripts/47099212.png}"
+IMAGE_PATH="${2:-/data/jinjiarui/run/ecg-r1-web/archive/scripts/47099212.png}"
 TIMEOUT_STREAM="${TIMEOUT_STREAM:-180}"
 MAX_STREAM_LINES="${MAX_STREAM_LINES:-240}"
 

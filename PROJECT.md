@@ -142,7 +142,9 @@ Ubuntu 22.04 示例（需要 sudo 权限）：
 - 增加后端健康检查与 GPU/模型加载状态页（当前已有 /status，后续可扩展）
 
 ## 版本记录（手动维护）
+- 2026-05-15：新增 `VLLM_GPU_MEMORY_UTILIZATION` 配置；将 `VLLM_MAX_MODEL_LEN` 从 32768 调整为 8192
 - 2026-05-14：补充 vLLM/Web 独立启动停止说明；明确远程状态 badge 依赖 `/status` JSON；vLLM health 在引擎错误时返回非 200
+- 2026-05-15：`scripts/` 目录仅保留 `serve_web.sh` 和 `serve_vllm.sh`；兼容与测试脚本移到 `archive/scripts/`
 - 2026-05-13：推理服务从 Swift GRPO rollout 切换为直接 vLLM `AsyncLLMEngine`；新增 `vllm_direct` provider 和 `scripts/serve_vllm.sh`，支持真实流式增量输出
 - 2026-05-13：将启动配置收敛到仓库内 `config.py`；启动脚本不再读取外部 shell 环境变量作为配置来源，并按配置激活 conda 环境
 - 2026-05-13：重构推理边界；新增 provider 架构、Swift rollout 适配、本仓库内 ECG-R1 vLLM runtime 代码、独立 Web/rollout 启动脚本

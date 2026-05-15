@@ -64,6 +64,7 @@ async def startup() -> None:
         dtype="bfloat16",
         load_format=config.VLLM_LOAD_FORMAT,
         enforce_eager=config.VLLM_ENFORCE_EAGER,
+        gpu_memory_utilization=config.VLLM_GPU_MEMORY_UTILIZATION,
         max_model_len=config.VLLM_MAX_MODEL_LEN,
         max_num_seqs=config.VLLM_MAX_NUM_SEQS,
         disable_custom_all_reduce=True,
